@@ -2,7 +2,7 @@ import json
 import numpy as np
 import plotly.graph_objects as go
 import streamlit as st
-from core import ROOT, METRICS, LABELS, PRESETS, load_data, score_counties, evidence_brief, annual_electricity_expense
+from core import ROOT, METRICS, LABELS, PRESETS, load_data, score_counties, evidence_brief, annual_electricity_expense, weight_sensitivity
 from weather import get_alerts
 
 st.set_page_config(page_title='Where Next | Warehouse location screening', layout='wide')
@@ -99,13 +99,25 @@ if chosen:
     st.caption('A point query does not cover every part of a county or a transport route. Weather does not change the investment score.')
 
 st.subheader('Scenario sensitivity')
-scenario_rows = []
-for name, w in PRESETS.items():
-    frame = score_counties(data,w)
-    frame = frame[frame.state.isin(states)&frame.complete].head(3)
-    for position,(_,r) in enumerate(frame.iterrows(),1):
-        scenario_rows.append({'Scenario':name,'Rank':position,'County':r['county']+', '+r['state'],'Score':round(r['score'],1)})
-st.dataframe(scenario_rows, hide_index=True, width='stretch')
+factor = st.selectbox('Scoring factor to test', LABELS, key='sensitivity_factor')
+st.caption('Starts from your current weights normalized to 100%. The selected factor moves by up to 10 percentage points, capped at 0–100%; other factors retain their relative proportions. If all other weights are zero, released weight is split equally among them. Rankings use the complete five-state universe before filtering to your selected states.')
+scenarios = weight_sensitivity(data, weights, LABELS.index(factor), states)
+st.dataframe([{'Scenario': s['name'], **dict(zip(LABELS, s['display_weights']))} for s in scenarios], hide_index=True, width='stretch')
+st.caption('Weights are shown as percentages rounded to two decimals with rounding remainders allocated so each row totals 100%. Scores use unrounded weights.')
+for scenario in scenarios:
+    st.write('**' + scenario['name'] + '**')
+    top = scenario['top_five'][['rank', 'county', 'state', 'score']].rename(columns={'rank': 'Rank', 'county': 'County', 'state': 'State', 'score': 'Score'})
+    st.dataframe(top, hide_index=True, width='stretch')
+    st.caption('Current top-three counties and any entrants, compared with the current weights:')
+    changes = scenario['top_three_changes'][['county', 'state', 'rank', 'change']].rename(columns={'county': 'County', 'state': 'State', 'rank': 'Scenario rank', 'change': 'Top-three membership'})
+    st.dataframe(changes, hide_index=True, width='stretch')
+winners = [s['top_five'].iloc[0] for s in scenarios if not s['top_five'].empty]
+if not winners:
+    st.info('No complete counties are available in the selected states for sensitivity analysis.')
+elif len({row.fips for row in winners}) == 1:
+    st.info(f"{winners[0]['county']}, {winners[0]['state']} remains first in all three scenarios.")
+else:
+    st.info('The first-ranked county changes across these scenarios; see the rankings above.')
 
 with st.expander('Methodology, source dates, and limitations'):
     st.write('2024 Census population and representative points; 2024 private-sector QCEW NAICS 493 annual employment and average pay; 2024 EIA state commercial electricity prices.')

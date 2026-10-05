@@ -34,6 +34,61 @@ def score_counties(data, weights):
     out.loc[complete, 'score'] = (out.loc[complete, columns] * (weights / weights.sum())).sum(axis=1)
     return out.sort_values(['score', 'fips'], ascending=[False, True], na_position='last').reset_index(drop=True)
 
+def sensitivity_weights(weights, factor, change):
+    """Normalize current weights, then move one factor by percentage points."""
+    current = np.asarray(weights, dtype=float)
+    if (current.shape != (4,) or not np.isfinite(current).all()
+            or (current < 0).any() or (current > 100).any() or current.sum() <= 0):
+        raise ValueError('Use four weights between 0 and 100 with a positive total.')
+    if factor not in range(4) or not np.isfinite(change):
+        raise ValueError('Use a factor index from 0 to 3 and a finite change.')
+    current = current / current.sum() * 100
+    others = [i for i in range(4) if i != factor]
+    adjusted = current.copy()
+    adjusted[factor] = np.clip(current[factor] + change, 0, 100)
+    remainder = 100 - adjusted[factor]
+    other_total = current[others].sum()
+    if other_total > 0:
+        adjusted[others] = current[others] / other_total * remainder
+    else:
+        # No existing proportions: split any released weight equally.
+        adjusted[others] = remainder / 3
+    recipient = others[int(np.argmax(adjusted[others]))]
+    adjusted[recipient] += 100 - adjusted.sum()
+    return adjusted.tolist()
+
+
+def weight_sensitivity(data, weights, factor, states):
+    """Rank all complete candidates before filtering; compare top-three membership."""
+    scenarios = []
+    for name, change in [('Current weight', 0), ('Selected factor minus 10 percentage points', -10),
+                         ('Selected factor plus 10 percentage points', 10)]:
+        adjusted = sensitivity_weights(weights, factor, change)
+        scored = score_counties(data, adjusted)
+        ranked = scored[scored.complete & scored.state.isin(states)].copy()
+        ranked['rank'] = np.arange(1, len(ranked) + 1)
+        # Largest-remainder rounding for display only: exactly 10,000 basis points.
+        scaled = np.asarray(adjusted) * 100
+        rounded = np.floor(scaled).astype(int)
+        order = np.argsort(-(scaled - rounded), kind='stable')
+        for i in order[:10000 - rounded.sum()]:
+            rounded[i] += 1
+        scenarios.append({'name': name, 'weights': adjusted,
+                          'display_weights': (rounded / 100).tolist(), 'ranked': ranked})
+    current_ids = set(scenarios[0]['ranked'].head(3).fips)
+    for scenario in scenarios:
+        ranked = scenario.pop('ranked')
+        top_ids = set(ranked.head(3).fips)
+        tracked = ranked[ranked.fips.isin(current_ids | top_ids)].copy()
+        tracked['change'] = [
+            'Remains top three' if fips in current_ids and fips in top_ids
+            else 'Drops out of top three' if fips in current_ids
+            else 'Enters top three' for fips in tracked.fips]
+        scenario['top_five'] = ranked.head(5)
+        scenario['top_three_changes'] = tracked
+    return scenarios
+
+
 def annual_electricity_expense(annual_kwh, electricity_cents_kwh):
     """Illustrative dollars using a state average, not a property tariff."""
     return annual_kwh * electricity_cents_kwh / 100

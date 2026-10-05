@@ -3,6 +3,72 @@ import pytest
 from core import METRICS, PRESETS, load_data, score_counties, distance_miles, annual_electricity_expense
 from prepare_data import validate_bytes
 from weather import get_alerts
+from core import sensitivity_weights, weight_sensitivity
+
+
+@pytest.mark.parametrize('weights,factor,change,expected', [
+    ([40, 30, 20, 10], 0, 10, [50, 25, 50/3, 25/3]),
+    ([40, 30, 20, 10], 0, -10, [30, 35, 70/3, 35/3]),
+    ([5, 45, 30, 20], 0, -10, [0, 4500/95, 3000/95, 2000/95]),
+    ([95, 3, 1, 1], 0, 10, [100, 0, 0, 0]),
+    ([0, 50, 25, 25], 0, -10, [0, 50, 25, 25]),
+    ([100, 0, 0, 0], 0, 10, [100, 0, 0, 0]),
+    ([100, 0, 0, 0], 0, -10, [90, 10/3, 10/3, 10/3]),
+    ([80, 60, 40, 20], 0, 10, [50, 25, 50/3, 25/3]),
+])
+def test_sensitivity_adjustments(weights, factor, change, expected):
+    result = sensitivity_weights(weights, factor, change)
+    assert result == pytest.approx(expected)
+    assert sum(result) == pytest.approx(100)
+    assert all(0 <= weight <= 100 for weight in result)
+    assert result == sensitivity_weights(weights, factor, change)
+
+
+def test_sensitivity_all_factors_and_rounding():
+    data, _ = load_data()
+    for factor in range(4):
+        scenarios = weight_sensitivity(data, [1, 1, 1, 0], factor, ['PA'])
+        repeat = weight_sensitivity(data, [1, 1, 1, 0], factor, ['PA'])
+        for scenario, repeated in zip(scenarios, repeat):
+            assert sum(scenario['display_weights']) == pytest.approx(100)
+            assert sum(round(w * 100) for w in scenario['display_weights']) == 10000
+            assert scenario['weights'] == repeated['weights']
+            assert scenario['top_five'].equals(repeated['top_five'])
+            assert scenario['top_three_changes'].equals(repeated['top_three_changes'])
+            expected = score_counties(data, scenario['weights'])
+            expected = expected[expected.complete & expected.state.eq('PA')].head(5)
+            assert scenario['top_five'].fips.tolist() == expected.fips.tolist()
+            assert scenario['top_five'].score.tolist() == expected.score.tolist()
+            assert scenario['top_five']['rank'].tolist() == [1, 2, 3, 4, 5]
+            assert scenario['top_five'].complete.all()
+        baseline = score_counties(data, [1, 1, 1, 0])
+        baseline = baseline[baseline.complete & baseline.state.eq('PA')].head(5)
+        assert scenarios[0]['top_five'].score.tolist() == pytest.approx(baseline.score.tolist())
+        current_ids = set(scenarios[0]['top_five'].head(3).fips)
+        for scenario in scenarios:
+            top_ids = set(scenario['top_five'].head(3).fips)
+            changes = scenario['top_three_changes'].set_index('fips')['change'].to_dict()
+            assert set(changes) == current_ids | top_ids
+            for fips in current_ids | top_ids:
+                expected = ('Remains top three' if fips in current_ids & top_ids
+                            else 'Drops out of top three' if fips in current_ids
+                            else 'Enters top three')
+                assert changes[fips] == expected
+
+
+@pytest.mark.parametrize('weights', [[0, 0, 0, 0], [-1, 30, 20, 10],
+                                     [101, 0, 0, 0], [np.nan, 1, 1, 1], [1, 2, 3]])
+def test_sensitivity_invalid_weights(weights):
+    with pytest.raises(ValueError):
+        sensitivity_weights(weights, 0, 10)
+
+
+def test_sensitivity_no_complete_candidates():
+    data, _ = load_data()
+    data['annual_pay'] = np.nan
+    for scenario in weight_sensitivity(data, [40, 30, 20, 10], 0, ['PA']):
+        assert scenario['top_five'].empty
+        assert scenario['top_three_changes'].empty
 
 def test_real_data_and_geometry_are_complete():
     data, geometry=load_data()
