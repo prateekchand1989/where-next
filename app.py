@@ -2,7 +2,7 @@ import json
 import numpy as np
 import plotly.graph_objects as go
 import streamlit as st
-from core import ROOT, METRICS, LABELS, PRESETS, load_data, score_counties, evidence_brief
+from core import ROOT, METRICS, LABELS, PRESETS, load_data, score_counties, evidence_brief, annual_electricity_expense
 from weather import get_alerts
 
 st.set_page_config(page_title='Where Next | Warehouse location screening', layout='wide')
@@ -53,13 +53,34 @@ fig.update_layout(map={'style':'white-bg','center':{'lon':-98 if national else -
 st.plotly_chart(fig, width='stretch', key='county_map')
 st.caption('Map: U.S. Census 2024 boundaries. Gray = unranked, unavailable, or outside selected scope. No commercial map token required.')
 
+st.subheader('Data coverage')
+st.caption('2024 private-sector warehousing/storage (NAICS 493) labor records for the selected states, counted by labor status.')
+coverage = view.groupby(['state', 'labor_status']).size().unstack(fill_value=0)
+coverage = coverage.reindex(columns=['Available', 'Suppressed by BLS', 'No matching published BLS row'], fill_value=0)
+coverage = coverage.rename(columns={'Suppressed by BLS': 'Suppressed', 'No matching published BLS row': 'Unpublished'})
+coverage['Total counties'] = coverage.sum(axis=1)
+coverage = coverage.rename_axis('State').reset_index()
+st.dataframe(coverage, hide_index=True, width='stretch', key='data_coverage')
+st.caption('Unpublished means no matching published BLS row. Suppressed and missing labor figures remain unavailable; incomplete counties remain gray and can be searched and selected below.')
+
 st.subheader('Inspect and compare')
 labels = dict(zip(view.fips,view.county+', '+view.state))
 chosen = st.multiselect('Choose up to three counties', list(labels), default=list(ranked.head(3).fips), format_func=lambda x:labels[x],max_selections=3)
+annual_kwh = st.number_input('Annual electricity consumption (kWh)', min_value=0.0, value=None, step=1000.0, key='annual_kwh')
 if chosen:
     selected = all_scored.set_index('fips').loc[chosen].reset_index()
     table = selected[['county','state','score','reach_250mi','annual_pay','employment','electricity_cents_kwh','labor_status']].copy()
     st.dataframe(table,hide_index=True,width='stretch')
+    st.write('**Illustrative annual electricity expense**')
+    st.caption('Annual kWh × electricity price in cents/kWh ÷ 100. Uses the 2024 state commercial average, not an actual property tariff or site quote. This expense does not change screening scores.')
+    if annual_kwh is None:
+        st.caption('Enter annual electricity consumption to calculate an illustrative expense for each selected county.')
+    else:
+        expenses = selected[['county', 'state', 'electricity_cents_kwh']].copy()
+        expenses['Annual consumption (kWh)'] = annual_kwh
+        expenses['Illustrative annual expense (USD)'] = annual_electricity_expense(annual_kwh, expenses['electricity_cents_kwh']).round(2)
+        expenses = expenses.rename(columns={'county': 'County', 'state': 'State', 'electricity_cents_kwh': '2024 state commercial average (cents/kWh)'})
+        st.dataframe(expenses, hide_index=True, width='stretch')
     for _,row in selected.iterrows():
         st.write(evidence_brief(row))
     current = st.selectbox('Weather at county representative point',chosen,format_func=lambda x:labels[x])

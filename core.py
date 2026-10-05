@@ -34,6 +34,11 @@ def score_counties(data, weights):
     out.loc[complete, 'score'] = (out.loc[complete, columns] * (weights / weights.sum())).sum(axis=1)
     return out.sort_values(['score', 'fips'], ascending=[False, True], na_position='last').reset_index(drop=True)
 
+def annual_electricity_expense(annual_kwh, electricity_cents_kwh):
+    """Illustrative dollars using a state average, not a property tariff."""
+    return annual_kwh * electricity_cents_kwh / 100
+
+
 def distance_miles(lat, lon, latitudes, longitudes):
     a, b = np.radians(latitudes), np.radians(longitudes)
     p, q = np.radians(lat), np.radians(lon)

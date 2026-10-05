@@ -1,6 +1,6 @@
 import numpy as np
 import pytest
-from core import METRICS, PRESETS, load_data, score_counties, distance_miles
+from core import METRICS, PRESETS, load_data, score_counties, distance_miles, annual_electricity_expense
 from prepare_data import validate_bytes
 from weather import get_alerts
 
@@ -32,6 +32,11 @@ def test_reference_and_determinism():
     assert a[a.state=='PA'].score.equals(b[b.state=='PA'].score)
     assert a.loc[a.complete,'score'].between(0,100).all()
     assert not a.score.equals(score_counties(data,[30,25,15,30]).score)
+
+def test_annual_electricity_expense():
+    assert annual_electricity_expense(1000, 10) == pytest.approx(100)
+    assert np.isnan(annual_electricity_expense(1000, np.nan))
+
 
 def test_distance_identity_and_known_scale():
     assert distance_miles(40,-75,np.array([40]),np.array([-75]))[0]==0
