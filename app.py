@@ -27,6 +27,32 @@ def formatted_number(value, pattern):
     return format(value, pattern) if np.isfinite(value) else 'Unavailable'
 
 
+WEIGHT_KEYS = [f'priority_weight_{i}' for i in range(4)]
+
+
+def rebalance_priority_weights(changed_index):
+    """Keep the changed slider fixed and proportionally rebalance the rest to total 100."""
+    changed_value = int(st.session_state[WEIGHT_KEYS[changed_index]])
+    remainder = 100 - changed_value
+    other_indices = [i for i in range(4) if i != changed_index]
+    other_values = np.array([st.session_state[WEIGHT_KEYS[i]] for i in other_indices], dtype=float)
+    other_total = other_values.sum()
+
+    if other_total > 0:
+        exact = other_values / other_total * remainder
+    else:
+        exact = np.full(3, remainder / 3)
+
+    floored = np.floor(exact).astype(int)
+    leftover = remainder - int(floored.sum())
+    order = np.argsort(-(exact - floored), kind='stable')
+    for position in order[:leftover]:
+        floored[position] += 1
+
+    for index, value in zip(other_indices, floored):
+        st.session_state[WEIGHT_KEYS[index]] = int(value)
+
+
 data, geometry = read_data()
 with st.sidebar:
     st.header('Business priorities')
@@ -38,15 +64,23 @@ with st.sidebar:
     states = st.multiselect('Candidate states', ['MD', 'NJ', 'NY', 'OH', 'PA'],
                             default=['MD', 'NJ', 'NY', 'OH', 'PA'], label_visibility='collapsed')
     st.subheader('Business priority weights')
-    weights = [st.slider(label, 0, 100, int(default), key=f'{preset}_{i}')
-               for i, (label, default) in enumerate(zip(LABELS, PRESETS[preset]))]
-    if sum(weights) == 0:
-        st.warning('Set at least one weight above zero.')
-        st.stop()
-    normalized_weights = np.asarray(weights, dtype=float) / sum(weights) * 100
-    st.caption('Normalized mix · percentages total 100% before display rounding.')
+    if st.session_state.get('weight_preset') != preset:
+        st.session_state['weight_preset'] = preset
+        for key, default in zip(WEIGHT_KEYS, PRESETS[preset]):
+            st.session_state[key] = int(default)
+
+    weights = [
+        st.slider(
+            label, 0, 100, key=WEIGHT_KEYS[i],
+            on_change=rebalance_priority_weights, args=(i,)
+        )
+        for i, label in enumerate(LABELS)
+    ]
+    st.caption('Move any slider and the other three rebalance automatically so the total remains 100%.')
+    st.caption(f"Current total: **{sum(weights)}%**")
+    normalized_weights = np.asarray(weights, dtype=float)
     for label, weight in zip(LABELS, normalized_weights):
-        st.caption(f'{label}: **{weight:.2f}%**')
+        st.caption(f'{label}: **{weight:.0f}%**')
     st.subheader('Map settings')
     national = st.checkbox('Show contiguous U.S. overview', value=False)
     st.caption('Outside the five-state scope: no score. National outlines provide geographic context.')
