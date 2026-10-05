@@ -1,0 +1,40 @@
+{
+  "prepared_utc": "2026-10-05T01:33:49.514253+00:00",
+  "sources": [
+    {
+      "file": "population.csv",
+      "url": "https://www2.census.gov/programs-surveys/popest/datasets/2020-2024/counties/totals/co-est2024-alldata.csv",
+      "observation_period": "2024",
+      "sha256": "abcc8720d669e793bbfdcd440eeec37a78db3b452adbe4ccd1eadf7c72b522b9",
+      "local_file_timestamp_utc": "2026-10-05T01:33:48.192062+00:00"
+    },
+    {
+      "file": "qcew.csv",
+      "url": "https://data.bls.gov/cew/data/api/2024/a/industry/493.csv",
+      "observation_period": "2024",
+      "sha256": "a5af780efed9948a7753b635b94497060f8bc34582a08ce0f336e1f29d205663",
+      "local_file_timestamp_utc": "2026-10-05T01:33:48.193980+00:00"
+    },
+    {
+      "file": "gazetteer.zip",
+      "url": "https://www2.census.gov/geo/docs/maps-data/data/gazetteer/2024_Gazetteer/2024_Gaz_counties_national.zip",
+      "observation_period": "2024",
+      "sha256": "3c337402b5c6e8d5aa26b4278ccf4edc8989f2683765b3ffbf22296cdb2df3a0",
+      "local_file_timestamp_utc": "2026-10-05T01:33:48.199492+00:00"
+    },
+    {
+      "file": "counties.zip",
+      "url": "https://www2.census.gov/geo/tiger/GENZ2024/shp/cb_2024_us_county_20m.zip",
+      "observation_period": "2024",
+      "sha256": "c9a54fd95422436b8822e0b070a45a9bc3de08eb13f943cdba66e7a9c2a135ff",
+      "local_file_timestamp_utc": "2026-10-05T01:33:48.200062+00:00"
+    },
+    {
+      "file": "energy.xlsx",
+      "url": "https://www.eia.gov/electricity/sales_revenue_price/xls/table_4.xlsx",
+      "observation_period": "2024",
+      "sha256": "e5a6964b5100890fe67a1d7ced25ec069c89e218853b8ec17ca7b6933902fbc9",
+      "local_file_timestamp_utc": "2026-10-05T01:33:48.202862+00:00"
+    }
+  ]
+}
