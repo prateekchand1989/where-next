@@ -1,0 +1,30 @@
+{
+  "source": "FEMA National Risk Index Counties",
+  "source_url": "https://services.arcgis.com/XG15cJAlne2vxtgt/arcgis/rest/services/National_Risk_Index_Counties/FeatureServer/0",
+  "item_url": "https://www.arcgis.com/sharing/rest/content/items/39485e8035d446a5bff03259508ae355",
+  "query_url": "https://services.arcgis.com/XG15cJAlne2vxtgt/arcgis/rest/services/National_Risk_Index_Counties/FeatureServer/0/query?f=json&where=STATEFIPS+IN+%28%2724%27%2C%2734%27%2C%2736%27%2C%2739%27%2C%2742%27%29&outFields=STCOFIPS%2CRISK_SCORE%2CRISK_RATNG%2CEAL_VALT%2CIFLD_RISKS%2CIFLD_RISKR%2CCFLD_RISKS%2CCFLD_RISKR%2CWNTW_RISKS%2CWNTW_RISKR%2CHRCN_RISKS%2CHRCN_RISKR%2CNRI_VER&returnGeometry=false&orderByFields=STCOFIPS&resultRecordCount=1000",
+  "version": "December 2025 (1.20.0)",
+  "retrieved_utc": "2026-10-06T02:35:26.411801+00:00",
+  "source_data_updated_utc": "2025-12-16T07:37:01.340000+00:00",
+  "fields": {
+    "STCOFIPS": "State-County FIPS Code",
+    "RISK_SCORE": "National Risk Index - Score - Composite",
+    "RISK_RATNG": "National Risk Index - Rating - Composite",
+    "EAL_VALT": "Expected Annual Loss - Total - Composite",
+    "IFLD_RISKS": "Inland Flooding - Hazard Type Risk Index Score",
+    "IFLD_RISKR": "Inland Flooding - Hazard Type Risk Index Rating",
+    "CFLD_RISKS": "Coastal Flooding - Hazard Type Risk Index Score",
+    "CFLD_RISKR": "Coastal Flooding - Hazard Type Risk Index Rating",
+    "WNTW_RISKS": "Winter Weather - Hazard Type Risk Index Score",
+    "WNTW_RISKR": "Winter Weather - Hazard Type Risk Index Rating",
+    "HRCN_RISKS": "Hurricane - Hazard Type Risk Index Score",
+    "HRCN_RISKR": "Hurricane - Hazard Type Risk Index Rating",
+    "NRI_VER": "National Risk Index Version"
+  },
+  "response_sha256": "5cc2e8e73d08a115deff43a1fa26235f45dc9c7f2d6a7efb9575633c6671d989",
+  "source_counties": 262,
+  "matched": 262,
+  "unmatched": 0,
+  "duplicate_fips": [],
+  "unmatched_fips": []
+}

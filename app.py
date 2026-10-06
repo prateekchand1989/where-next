@@ -4,6 +4,7 @@ import plotly.graph_objects as go
 import streamlit as st
 from core import ROOT, LABELS, PRESETS, load_data, score_counties, evidence_brief, annual_electricity_expense, weight_sensitivity
 from weather import get_alerts, get_forecast
+from fema import FIELDS as FEMA_FIELDS, NUMERIC_FIELDS as FEMA_NUMERIC_FIELDS, load_fema_context
 
 st.set_page_config(page_title='Where Next | Warehouse Location Intelligence', layout='wide')
 st.title('Where Next?')
@@ -59,6 +60,7 @@ def rebalance_priority_weights(changed_index):
 
 
 data, geometry = read_data()
+fema_context, fema_metadata = load_fema_context(data)
 with st.sidebar:
     st.header('Business priorities')
     st.caption('Define the screening question, then explore the trade-offs.')
@@ -110,12 +112,14 @@ map_column, summary_column = st.columns([3, 1.35], gap='large', wrap=True)
 with map_column:
     with st.container(border=True):
         st.subheader('County screening map')
+        map_view = st.selectbox('Map view', ['Warehouse screening score', 'FEMA risk context'],
+                                key='map_view')
         fig = go.Figure()
         fig.add_trace(go.Choroplethmap(
             geojson=geometry, locations=[f['id'] for f in geometry['features']], z=[0] * len(geometry['features']),
             colorscale=[[0, '#e6e8eb'], [1, '#e6e8eb']], showscale=False,
             marker_line_width=0.25, marker_line_color='#ffffff', hoverinfo='skip'))
-        if not ranked.empty:
+        if map_view == 'Warehouse screening score' and not ranked.empty:
             fig.add_trace(go.Choroplethmap(
                 geojson=geometry, locations=ranked.fips, z=ranked.score,
                 text=ranked.county + ', ' + ranked.state, colorscale='Teal', zmin=0, zmax=100,
@@ -127,12 +131,36 @@ with map_column:
                     '<br>Warehousing employment: %{customdata[1]:,.0f}'
                     '<br>Average annual pay: $%{customdata[2]:,.0f}'
                     '<br>Electricity benchmark: %{customdata[3]:.2f} cents/kWh<extra></extra>')))
+        elif map_view == 'FEMA risk context':
+            if fema_metadata['status'] == 'ok':
+                hazard_map = view[['fips', 'county', 'state']].merge(
+                    fema_context[['fips', 'RISK_SCORE', 'RISK_RATNG']],
+                    on='fips', how='left', validate='one_to_one')
+                hazard_map = hazard_map[hazard_map.RISK_SCORE.notna()]
+                fig.add_trace(go.Choroplethmap(
+                    geojson=geometry, locations=hazard_map.fips, z=hazard_map.RISK_SCORE,
+                    text=hazard_map.county + ', ' + hazard_map.state,
+                    customdata=hazard_map[['RISK_RATNG']].fillna('Unavailable').to_numpy(),
+                    colorscale='YlOrRd', zmin=0, zmax=100,
+                    marker_line_width=0.5, marker_line_color='#ffffff',
+                    colorbar_title='FEMA risk',
+                    hovertemplate=('<b>%{text}</b><br>FEMA risk score: %{z:.1f}/100'
+                                   '<br>FEMA rating: %{customdata[0]}<extra></extra>')))
+                st.caption('FEMA community risk context · Higher means higher relative risk. Gray = unavailable or outside selected scope. Warehouse rankings remain unchanged.')
+            else:
+                st.info('FEMA risk context unavailable. Warehouse screening remains available.')
         fig.update_layout(
             map={'style': 'white-bg', 'center': {'lon': -98 if national else -77.8, 'lat': 39 if national else 40.2},
                  'zoom': 2.6 if national else 4.3},
             height=540, margin={'l': 0, 'r': 0, 't': 0, 'b': 0}, clickmode='event+select')
-        st.plotly_chart(fig, width='stretch', key='county_map', alt='County screening scores with unranked counties in gray')
-        st.caption('Census 2024 boundaries · Gray = unranked, unavailable, or outside selected scope. No commercial map token required.')
+        st.plotly_chart(fig, width='stretch', key='county_map',
+                        alt=('County screening scores with unranked counties in gray'
+                             if map_view == 'Warehouse screening score'
+                             else 'FEMA long-term county risk context with missing counties in gray'))
+        if map_view == 'Warehouse screening score':
+            st.caption('Census 2024 boundaries · Gray = unranked, unavailable, or outside selected scope. No commercial map token required.')
+        else:
+            st.caption('FEMA county context uses the existing Census 2024 map boundaries; this is not a property-level hazard map.')
 with summary_column:
     with st.container(border=True):
         st.subheader('Current top five')
@@ -195,6 +223,26 @@ if chosen:
     with st.expander('County evidence summaries'):
         for _, row in selected.iterrows():
             st.write(evidence_brief(row))
+    with st.expander('Long-term hazard context', expanded=True):
+        st.caption('Long-term hazard and resilience context. NWS = current / near-term operational weather. FEMA NRI = historical/modelled long-term hazard context. Neither alters the warehouse screening score.')
+        st.caption('FEMA community risk is not the probability that a specific warehouse will be damaged. County flood scores are not a property-level flood assessment; investigate site flood maps and engineering separately.')
+        if fema_metadata['status'] != 'ok':
+            st.info('FEMA hazard data unavailable. Warehouse screening remains available.')
+        else:
+            hazard_table = selected[['fips', 'county', 'state']].merge(
+                fema_context, on='fips', how='left', validate='one_to_one')
+            hazard_table['County'] = hazard_table.county + ', ' + hazard_table.state
+            for field in FEMA_NUMERIC_FIELDS:
+                hazard_table[field] = hazard_table[field].map(
+                    lambda value, field=field: 'Unavailable' if not np.isfinite(value)
+                    else f'${value:,.0f}' if field == 'EAL_VALT' else f'{value:.1f} / 100')
+            hazard_table = hazard_table[['County', *FEMA_FIELDS]].rename(columns=FEMA_FIELDS)
+            st.dataframe(hazard_table.fillna('Unavailable'), hide_index=True, width='stretch',
+                         alt='FEMA overall risk, annual loss, flood, winter weather, and hurricane context for selected counties')
+            st.caption(f"FEMA NRI · {fema_metadata['version']} · retrieved {fema_metadata['retrieved_utc']} · source data updated {fema_metadata['source_data_updated_utc']}")
+            st.caption(f"FIPS coverage: {fema_metadata['matched']} matched; {fema_metadata['unmatched']} unmatched; {len(fema_metadata['duplicate_fips'])} duplicate FIPS. Missing values remain unavailable; FEMA applicability ratings are preserved.")
+            st.caption('Expected annual loss is a county aggregate including buildings, agriculture, and monetized population losses; it is not a warehouse loss estimate. Scores are relative indices, not damage probabilities.')
+            st.markdown('[FEMA National Risk Index county source](' + fema_metadata['source_url'] + ')')
     with st.expander('Operational context · NWS alerts', expanded=True):
         current = st.selectbox('Weather at county representative point', chosen, format_func=lambda x: labels[x])
         row = data.set_index('fips').loc[current]
@@ -281,7 +329,7 @@ with st.expander('Data coverage & methodology'):
     st.write('Reach counts U.S. county populations whose representative points fall within 250 straight-line miles. It is a coarse proxy; no road routing or carrier delivery promise is inferred. Border-area population outside the U.S. is excluded.')
     st.write('Average industry annual pay is not an hourly job-offer wage. Employment is existing workforce depth, not available jobseekers. State commercial electricity averages are not property tariffs. No rent, building availability, tax incentives, freight quotes, or property flood assessment is included.')
     st.write('Each factor uses percentile rank among the fixed complete five-state candidate set. Lower costs get higher component scores. Incomplete candidates are not scored. Small employment bases can produce unstable comparisons; investigate the underlying records.')
-    st.caption('AI interpretation and FEMA hazard layers are not implemented.')
+    st.caption('AI interpretation is not implemented. FEMA hazard context is presented separately from screening scores.')
     st.json(json.loads((ROOT / 'data/sources.json').read_text()))
 st.download_button('Download current county results', view.to_csv(index=False),
                    file_name='where-next-results.csv', mime='text/csv')

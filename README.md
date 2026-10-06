@@ -13,11 +13,13 @@ Start with **START_HERE.md**, which contains the 17-step Windows-oriented build 
 - Editable weights, two illustrative business presets, three-county comparison, source metadata, CSV export.
 - Weight sensitivity from current priorities: test any factor at current, minus 10, and plus 10 percentage points, with top-five rankings and top-three membership changes.
 - On-demand NWS alerts at a county representative point, with unavailable-data handling.
+- NWS point forecasts with a 15-minute cache, kept separate from warehouse scores.
+- FEMA county hazard context and an optional FEMA risk map view; warehouse screening remains the default map and ranking.
 - Deterministic tests for scoring, electricity expense, weight sensitivity, and failure handling; app behavior checked with Streamlit AppTest.
 
 ## Not yet implemented
 
-AI interpretation, generated AI explanations, FEMA risk layers, actual property screening, road routing, customer-order upload, rents, carrier prices, and a hosted public deployment. START_HERE.md tells you how to add and validate these in stages. The built-in explanation is an explicit code-generated evidence summary, not an LLM output.
+AI interpretation, generated AI explanations, actual property screening, road routing, customer-order upload, rents, carrier prices, and a hosted public deployment. START_HERE.md tells you how to add and validate these in stages. The built-in explanation is an explicit code-generated evidence summary, not an LLM output.
 
 ## Start on Windows
 
@@ -41,6 +43,37 @@ Use the URL shown in the terminal, usually http://localhost:8501. The processed 
 This downloads five official files into `data/raw/` and produces the three processed files. Raw files are not included in Git commits. Valid raw files are reused; remove a specific raw file to fetch it again. This is a frozen 2024 baseline, not an automatic latest-year updater. EIA's live file address can change its reference year; the script checks for 2024 and stops for review rather than silently mixing vintages.
 
 ## Methodology
+
+### FEMA National Risk Index context
+
+The separate FEMA snapshot uses the official [National Risk Index Counties layer](https://services.arcgis.com/XG15cJAlne2vxtgt/arcgis/rest/services/National_Risk_Index_Counties/FeatureServer/0), published by `FEMA_NationalRiskIndex` ([source item and release metadata](https://www.arcgis.com/home/item.html?id=39485e8035d446a5bff03259508ae355)). The current source inspected for this integration is **December 2025, version 1.20.0**. The service reports its data update as December 16, 2025, 07:37:01 UTC. Retrieved October 5, 2026, 10:35 PM EDT (October 6, 02:35 UTC); exact retrieval time, query, field aliases, response hash, and join coverage are recorded in `data/fema_sources.json`.
+
+The live schema was inspected before field selection. Selected fields are:
+
+| FEMA field | Use |
+| --- | --- |
+| `STCOFIPS` | Five-character county FIPS; the only join key |
+| `RISK_SCORE`, `RISK_RATNG` | Overall community risk score and rating |
+| `EAL_VALT` | County aggregate expected annual loss, USD/year |
+| `IFLD_RISKS`, `IFLD_RISKR` | Inland flooding risk score and rating |
+| `CFLD_RISKS`, `CFLD_RISKR` | Coastal flooding risk score and rating |
+| `WNTW_RISKS`, `WNTW_RISKR` | Winter weather risk score and rating |
+| `HRCN_RISKS`, `HRCN_RISKR` | Hurricane risk score and rating |
+| `NRI_VER` | Per-record source release |
+
+The snapshot matches **262 of 262** Where Next counties: **0 unmatched, 0 duplicate FIPS**. There are 184 unavailable coastal-flood scores; FEMA applicability ratings such as `Not Applicable` are retained. Missing values remain missing, never converted to zero. Duplicate FIPS in either input abort preparation with a clear error. County names are never used to join.
+
+Refresh FEMA separately, without rebuilding the warehouse baseline:
+
+```powershell
+.\.venv\Scripts\python.exe prepare_fema.py
+```
+
+Each refresh reads official publisher/release metadata and the live layer schema, then validates the selected fields and a one-to-one FIPS join. Schema errors and truncated responses stop preparation for review. Outputs are `data/fema_counties.csv` and `data/fema_sources.json`; raw evidence is saved under the Git-ignored `data/raw/`. The app reads the bundled snapshot locally without a live FEMA download or paid API. Missing or invalid FEMA files leave screening usable with an unavailable-data notice.
+
+FEMA is **long-term hazard and resilience context**, based on historical/modelled community data. NWS provides **current / near-term operational weather** at a representative point. Neither changes scores, weights, sensitivity, or rankings. FEMA risk scores are relative indices, not the probability that a particular warehouse will be damaged. Overall community risk incorporates loss, social vulnerability, and resilience. Expected annual loss includes county-wide buildings, agriculture, and monetized population losses; it is not a warehouse loss estimate or an insurance quote. A county flood score is not a property-level flood assessment and does not replace flood maps, site investigation, or engineering. FEMA's hazard inputs span different historical periods; the release date is not a common observation year or a future climate forecast. FEMA source county boundaries use 2021 TIGER/Line (2024 for Connecticut), while this app retains its existing 2024 Census map boundaries.
+
+This product uses FEMA National Risk Index data but is not endorsed by FEMA. FEMA cannot vouch for analyses derived after retrieval.
 
 Sensitivity first normalizes the current slider weights to 100%. The chosen factor is adjusted by minus/plus 10 percentage points, clamped to 0–100%. The remaining total is shared in the other factors' existing proportions; if they were all zero, it is shared equally. Full-precision weights drive scoring. Display percentages use largest-remainder rounding to two decimals and total 100%. Top-five ranks and top-three entries/exits refer to the selected states, after scoring the full complete five-state universe.
 
