@@ -3,7 +3,7 @@ import numpy as np
 import plotly.graph_objects as go
 import streamlit as st
 from core import ROOT, LABELS, PRESETS, load_data, score_counties, evidence_brief, annual_electricity_expense, weight_sensitivity
-from weather import get_alerts
+from weather import get_alerts, get_forecast
 
 st.set_page_config(page_title='Where Next | Warehouse Location Intelligence', layout='wide')
 st.title('Where Next?')
@@ -20,6 +20,11 @@ def read_data():
 @st.cache_data(ttl=900)
 def cached_weather(lat, lon):
     return get_alerts(lat, lon)
+
+
+@st.cache_data(ttl=900)
+def cached_forecast(lat, lon):
+    return get_forecast(lat, lon)
 
 
 def formatted_number(value, pattern):
@@ -204,6 +209,36 @@ if chosen:
             else:
                 st.warning('Weather unavailable. This does not mean there are no alerts.')
             st.markdown('[NWS source query](' + result['url'] + ')')
+        with st.container(border=True):
+            st.markdown(f"**Point forecast · {labels[current]}**")
+            st.caption('A point forecast is not county-wide or route-wide weather coverage. Weather is separate from the warehouse screening score.')
+            if st.button('Check NWS forecast'):
+                forecast = cached_forecast(float(row.lat), float(row.lon))
+                if forecast['status'] == 'ok':
+                    st.caption('Checked UTC: ' + forecast['checked_utc'] + ' · cached for up to 15 minutes')
+                    if forecast['updated']:
+                        st.caption('NWS updated: ' + forecast['updated'])
+                    if forecast['generated_at']:
+                        st.caption('NWS issued/generated: ' + forecast['generated_at'])
+                    st.dataframe([
+                        {'Period': period['name'],
+                         'Temperature': f"{period['temperature']} °{period['temperatureUnit']}",
+                         'Forecast': period['shortForecast'],
+                         'Wind': f"{period['windSpeed']} {period['windDirection']}"}
+                        for period in forecast['periods'][:4]
+                    ], hide_index=True, width='stretch',
+                       alt='Next four NWS forecast periods at the selected county representative point')
+                else:
+                    st.warning('Point forecast unavailable. Try again later.')
+                    # Temporary diagnostics for the live NWS request.
+                    st.json({
+                        'stage': forecast['stage'],
+                        'exception_type': forecast['error'],
+                        'http_status': forecast['http_status'],
+                        'requested_url': forecast['url'],
+                        'message': forecast['message'],
+                    })
+                st.markdown('[NWS forecast source](' + forecast['url'] + ')')
         st.caption('A point query does not cover every part of a county or a transport route. Weather does not change the investment score.')
 else:
     st.caption('Select a county to inspect its indicators, electricity expense, and weather context.')
