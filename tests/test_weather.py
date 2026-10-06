@@ -116,6 +116,8 @@ def test_forecast_failure_panel_hides_diagnostics(monkeypatch):
     st.cache_data.clear()
     mock_responses(monkeypatch, POINTS, HTTPError(FORECAST_URL, 503, 'Unavailable', {}, None))
     app = AppTest.from_file('../app.py', default_timeout=60).run()
+    comparison = next(widget for widget in app.multiselect if widget.label == 'Choose up to three counties')
+    app.selectbox(key='weather_county').select(comparison.value[0]).run()
     next(button for button in app.button if button.label == 'Check NWS forecast').click().run()
     assert not app.exception
     assert not any('exception_type' in element.value for element in app.json)
@@ -147,6 +149,8 @@ def test_forecast_panel_and_cache(monkeypatch):
     calls = mock_responses(monkeypatch, POINTS, FORECAST)
     app = AppTest.from_file('../app.py', default_timeout=60).run()
     assert not app.exception
+    comparison = next(widget for widget in app.multiselect if widget.label == 'Choose up to three counties')
+    app.selectbox(key='weather_county').select(comparison.value[0]).run()
     forecast_button = next(button for button in app.button
                            if button.label == 'Check NWS forecast')
     forecast_button.click().run()
@@ -159,4 +163,63 @@ def test_forecast_panel_and_cache(monkeypatch):
     next(button for button in app.button if button.label == 'Check NWS forecast').click().run()
     assert not app.exception
     assert len(calls) == 2  # Both NWS requests are reused for this point.
+    st.cache_data.clear()
+
+
+def test_weather_selector_starts_empty_and_handles_comparison_changes(monkeypatch):
+    import streamlit as st
+    from streamlit.testing.v1 import AppTest
+
+    st.cache_data.clear()
+    calls = mock_responses(monkeypatch)
+    app = AppTest.from_file('../app.py', default_timeout=60).run()
+    assert not app.exception
+    assert app.selectbox(key='weather_county').value is None
+    assert app.selectbox(key='weather_county').proto.placeholder == 'Select a county for weather'
+    assert not any(button.label.startswith('Check NWS') for button in app.button)
+    assert any('Select a county for weather, then click' in caption.value for caption in app.caption)
+
+    def compare(fips):
+        next(widget for widget in app.multiselect
+             if widget.label == 'Choose up to three counties').set_value(fips).run()
+        assert not app.exception
+
+    compare(['42069', '24001'])
+    assert app.selectbox(key='weather_county').options == ['Lackawanna County, PA', 'Allegany County, MD']
+    app.selectbox(key='weather_county').select('42069').run()
+    assert not app.exception and not calls
+    assert {button.label for button in app.button if button.label.startswith('Check NWS')} == {
+        'Check NWS alerts', 'Check NWS forecast'}
+    compare(['24001', '42069'])
+    assert app.selectbox(key='weather_county').value == '42069'
+    compare(['24001'])
+    assert app.selectbox(key='weather_county').value is None
+    assert app.selectbox(key='weather_county').options == ['Allegany County, MD']
+    assert not any(button.label.startswith('Check NWS') for button in app.button)
+    compare([])
+    assert not any(widget.key == 'weather_county' for widget in app.selectbox)
+    compare(['42069'])
+    assert app.selectbox(key='weather_county').value is None
+    assert not calls
+    st.cache_data.clear()
+
+
+def test_weather_requests_require_selection_and_button_click(monkeypatch):
+    import streamlit as st
+    from streamlit.testing.v1 import AppTest
+
+    st.cache_data.clear()
+    calls = mock_responses(monkeypatch, TimeoutError(), TimeoutError())
+    app = AppTest.from_file('../app.py', default_timeout=60).run()
+    next(widget for widget in app.multiselect
+         if widget.label == 'Choose up to three counties').set_value(['42069']).run()
+    assert not calls
+    app.selectbox(key='weather_county').select('42069').run()
+    assert not app.exception and not calls
+    next(button for button in app.button if button.label == 'Check NWS alerts').click().run()
+    assert not app.exception and len(calls) == 1
+    assert calls[0][0].full_url == 'https://api.weather.gov/alerts/active?point=41.4366,-75.6088'
+    next(button for button in app.button if button.label == 'Check NWS forecast').click().run()
+    assert not app.exception and len(calls) == 2
+    assert calls[1][0].full_url == 'https://api.weather.gov/points/41.4366,-75.6088'
     st.cache_data.clear()

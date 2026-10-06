@@ -5,6 +5,9 @@ import streamlit as st
 from core import ROOT, LABELS, PRESETS, load_data, score_counties, evidence_brief, annual_electricity_expense, weight_sensitivity
 from weather import get_alerts, get_forecast
 from fema import FIELDS as FEMA_FIELDS, NUMERIC_FIELDS as FEMA_NUMERIC_FIELDS, load_fema_context
+from interpretation import (SECTIONS, build_evidence, evidence_fingerprint,
+                            configured_provider, generate_interpretation)
+from streamlit.errors import StreamlitSecretNotFoundError
 
 st.set_page_config(page_title='Where Next | Warehouse Location Intelligence', layout='wide')
 st.title('Where Next?')
@@ -244,41 +247,50 @@ if chosen:
             st.caption('Expected annual loss is a county aggregate including buildings, agriculture, and monetized population losses; it is not a warehouse loss estimate. Scores are relative indices, not damage probabilities.')
             st.markdown('[FEMA National Risk Index county source](' + fema_metadata['source_url'] + ')')
     with st.expander('Operational context · NWS alerts', expanded=True):
-        current = st.selectbox('Weather at county representative point', chosen, format_func=lambda x: labels[x])
-        row = data.set_index('fips').loc[current]
-        if st.button('Check NWS alerts'):
-            result = cached_weather(float(row.lat), float(row.lon))
-            if result['status'] == 'ok':
-                st.caption('Checked UTC: ' + result['checked_utc'] + ' · cached for up to 15 minutes')
-                if result['alerts']:
-                    st.dataframe(result['alerts'], hide_index=True)
+        if st.session_state.get('weather_county') not in chosen:
+            st.session_state['weather_county'] = None
+        current = st.selectbox('Weather at county representative point', chosen,
+                               format_func=lambda x: labels[x], index=None,
+                               placeholder='Select a county for weather', key='weather_county')
+        if current is None:
+            st.caption('Select a county for weather, then click an NWS button to check conditions.')
+        else:
+            row = data.set_index('fips').loc[current]
+            if st.button('Check NWS alerts'):
+                result = cached_weather(float(row.lat), float(row.lon))
+                st.session_state.setdefault('interpretation_weather', {}).setdefault(current, {})['alerts'] = result
+                if result['status'] == 'ok':
+                    st.caption('Checked UTC: ' + result['checked_utc'] + ' · cached for up to 15 minutes')
+                    if result['alerts']:
+                        st.dataframe(result['alerts'], hide_index=True)
+                    else:
+                        st.success('NWS returned no active alerts for this point at the checked time.')
                 else:
-                    st.success('NWS returned no active alerts for this point at the checked time.')
-            else:
-                st.warning('Weather unavailable. This does not mean there are no alerts.')
-            st.markdown('[NWS source query](' + result['url'] + ')')
-        with st.container(border=True):
-            st.markdown(f"**Point forecast · {labels[current]}**")
-            st.caption('A point forecast is not county-wide or route-wide weather coverage. Weather is separate from the warehouse screening score.')
-            if st.button('Check NWS forecast'):
-                forecast = cached_forecast(float(row.lat), float(row.lon))
-                if forecast['status'] == 'ok':
-                    st.caption('Checked UTC: ' + forecast['checked_utc'] + ' · cached for up to 15 minutes')
-                    if forecast['updated']:
-                        st.caption('NWS updated: ' + forecast['updated'])
-                    if forecast['generated_at']:
-                        st.caption('NWS issued/generated: ' + forecast['generated_at'])
-                    st.dataframe([
-                        {'Period': period['name'],
-                         'Temperature': f"{period['temperature']} °{period['temperatureUnit']}",
-                         'Forecast': period['shortForecast'],
-                         'Wind': f"{period['windSpeed']} {period['windDirection']}"}
-                        for period in forecast['periods'][:4]
-                    ], hide_index=True, width='stretch',
-                       alt='Next four NWS forecast periods at the selected county representative point')
-                else:
-                    st.warning('Point forecast unavailable. Try again later.')
-                st.markdown('[NWS forecast source](' + forecast['url'] + ')')
+                    st.warning('Weather unavailable. This does not mean there are no alerts.')
+                st.markdown('[NWS source query](' + result['url'] + ')')
+            with st.container(border=True):
+                st.markdown(f"**Point forecast · {labels[current]}**")
+                st.caption('A point forecast is not county-wide or route-wide weather coverage. Weather is separate from the warehouse screening score.')
+                if st.button('Check NWS forecast'):
+                    forecast = cached_forecast(float(row.lat), float(row.lon))
+                    st.session_state.setdefault('interpretation_weather', {}).setdefault(current, {})['forecast'] = forecast
+                    if forecast['status'] == 'ok':
+                        st.caption('Checked UTC: ' + forecast['checked_utc'] + ' · cached for up to 15 minutes')
+                        if forecast['updated']:
+                            st.caption('NWS updated: ' + forecast['updated'])
+                        if forecast['generated_at']:
+                            st.caption('NWS issued/generated: ' + forecast['generated_at'])
+                        st.dataframe([
+                            {'Period': period['name'],
+                             'Temperature': f"{period['temperature']} °{period['temperatureUnit']}",
+                             'Forecast': period['shortForecast'],
+                             'Wind': f"{period['windSpeed']} {period['windDirection']}"}
+                            for period in forecast['periods'][:4]
+                        ], hide_index=True, width='stretch',
+                           alt='Next four NWS forecast periods at the selected county representative point')
+                    else:
+                        st.warning('Point forecast unavailable. Try again later.')
+                    st.markdown('[NWS forecast source](' + forecast['url'] + ')')
         st.caption('A point query does not cover every part of a county or a transport route. Weather does not change the investment score.')
 else:
     st.caption('Select a county to inspect its indicators, electricity expense, and weather context.')
@@ -313,6 +325,39 @@ with st.expander('How to read sensitivity results'):
     st.write('The selected factor moves by up to 10 percentage points, capped at 0–100%. Other factors retain their relative proportions. If all other weights are zero, released weight is split equally among them.')
     st.write('Weights are displayed to two decimals with rounding remainders allocated so each mix totals 100%. Scores use unrounded weights. Rankings use the complete five-state universe before filtering to your selected states.')
 
+if chosen:
+    with st.container(border=True):
+        st.subheader('Optional AI interpretation')
+        st.caption('Explain the supplied evidence and trade-offs. Scores and rankings stay calculated by Python. Clicking sends the evidence to the configured AI provider.')
+        evidence = build_evidence(selected, leader, weights, preset, states, annual_kwh,
+                                  fema_context, fema_metadata,
+                                  st.session_state.get('interpretation_weather', {}), factor, scenarios)
+        fingerprint = evidence_fingerprint(evidence)
+        if st.button('Explain selected locations', key='explain_locations'):
+            try:
+                ai_settings = {name: st.secrets.get(name) for name in
+                               ('AI_PROVIDER', 'OPENAI_API_KEY', 'OPENAI_MODEL') if name in st.secrets}
+            except StreamlitSecretNotFoundError:
+                ai_settings = {}
+            with st.spinner('Interpreting supplied evidence…'):
+                interpretation = generate_interpretation(evidence, configured_provider(ai_settings))
+            st.session_state['location_interpretation'] = {
+                'fingerprint': fingerprint, 'result': interpretation}
+        saved_interpretation = st.session_state.get('location_interpretation')
+        if saved_interpretation:
+            if saved_interpretation['fingerprint'] != fingerprint:
+                st.caption('Evidence changed. Click Explain selected locations for an updated interpretation.')
+            else:
+                interpretation = saved_interpretation['result']
+                if interpretation['status'] == 'ok':
+                    st.markdown('**AI-generated interpretation**')
+                    for key, heading in SECTIONS.items():
+                        st.markdown('**' + heading + '**')
+                        st.text(interpretation['sections'][key])
+                    st.caption('Review against the supplied evidence; this is an illustrative screening interpretation.')
+                else:
+                    st.info(interpretation['message'])
+
 with st.expander('Data coverage & methodology'):
     st.subheader('Data coverage')
     st.caption(f'{len(ranked)} of {len(view)} counties in the current selection have complete scoring data; {len(view) - len(ranked)} remain unranked.')
@@ -329,7 +374,7 @@ with st.expander('Data coverage & methodology'):
     st.write('Reach counts U.S. county populations whose representative points fall within 250 straight-line miles. It is a coarse proxy; no road routing or carrier delivery promise is inferred. Border-area population outside the U.S. is excluded.')
     st.write('Average industry annual pay is not an hourly job-offer wage. Employment is existing workforce depth, not available jobseekers. State commercial electricity averages are not property tariffs. No rent, building availability, tax incentives, freight quotes, or property flood assessment is included.')
     st.write('Each factor uses percentile rank among the fixed complete five-state candidate set. Lower costs get higher component scores. Incomplete candidates are not scored. Small employment bases can produce unstable comparisons; investigate the underlying records.')
-    st.caption('AI interpretation is not implemented. FEMA hazard context is presented separately from screening scores.')
+    st.caption('Optional AI interpretation explains supplied evidence. FEMA hazard context remains separate from screening scores.')
     st.json(json.loads((ROOT / 'data/sources.json').read_text()))
 st.download_button('Download current county results', view.to_csv(index=False),
                    file_name='where-next-results.csv', mime='text/csv')

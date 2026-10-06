@@ -15,11 +15,12 @@ Start with **START_HERE.md**, which contains the 17-step Windows-oriented build 
 - On-demand NWS alerts at a county representative point, with unavailable-data handling.
 - NWS point forecasts with a 15-minute cache, kept separate from warehouse scores.
 - FEMA county hazard context and an optional FEMA risk map view; warehouse screening remains the default map and ranking.
+- Optional AI-generated interpretation of supplied county evidence, with deterministic summaries retained.
 - Deterministic tests for scoring, electricity expense, weight sensitivity, and failure handling; app behavior checked with Streamlit AppTest.
 
 ## Not yet implemented
 
-AI interpretation, generated AI explanations, actual property screening, road routing, customer-order upload, rents, carrier prices, and a hosted public deployment. START_HERE.md tells you how to add and validate these in stages. The built-in explanation is an explicit code-generated evidence summary, not an LLM output.
+Actual property screening, road routing, customer-order upload, rents, carrier prices, and a hosted public deployment. START_HERE.md tells you how to add and validate these in stages. County evidence summaries remain explicit code-generated explanations; the separate optional AI output is clearly labeled.
 
 ## Start on Windows
 
@@ -33,6 +34,33 @@ py -m venv .venv
 ```
 
 Use the URL shown in the terminal, usually http://localhost:8501. The processed data is bundled, so first startup requires no Census, EIA, NWS, or Gemini account. NWS is contacted only when you click its button.
+
+## Optional AI interpretation
+
+Select counties and click **Explain selected locations**. Python builds a structured evidence object with an explicit field allowlist. An optional OpenAI provider sends that JSON and grounding instructions to the [Responses API](https://developers.openai.com/api/docs/guides/structured-outputs), using [`gpt-4.1-mini`](https://developers.openai.com/api/docs/models/gpt-4.1-mini) by default. No additional package is required. Model tools and external retrieval are disabled; application code, credentials, arbitrary session state, and raw error details are never included. Requests set `store=false` and have a 30-second timeout.
+
+The evidence object contains only:
+
+- `schema_version`, `baseline_year`, `scenario`, `candidate_states`, and `priority_weights_pct` keyed by the four business-priority labels.
+- `current_leader` and `selected_counties`: `fips`, `county`, `state`, `score`, `complete`, `reach_250mi`, `employment`, `annual_pay`, `electricity_cents_kwh`, `labor_status`, and `percentile_components` keyed by the four priority labels. The current leader is the highest-ranked complete county in the candidate states and may be outside the selected comparison.
+- `annual_electricity_consumption_kwh` and each selected county's `illustrative_annual_electricity_expense_usd`, calculated by Python if consumption was entered.
+- Each selected county's `fema`: the exact NRI fields listed below. `fema_source` contains only `status`, `version`, `source_url`, `retrieved_utc`, and `source_data_updated_utc`.
+- Each selected county's `nws`: representative-point `lat`/`lon` and separate alerts/forecast statuses. Results enter session evidence only after that session's NWS button is clicked. Successful results include `checked_utc`, `url`; alerts contain `event`, `headline`, `expires`, `area`; forecasts contain `updated`, `generated_at` and up to four periods with `name`, `temperature`, `temperatureUnit`, `shortForecast`, `windSpeed`, `windDirection`. Data older than 15 minutes is marked stale and its weather details are omitted. Failed or unfetched weather is explicit and never interpreted as no alerts.
+- `sensitivity`: selected `factor` and scenarios with `name`, `weights_pct`, `top_five` (`fips`, `county`, `state`, `rank`, `score`), and `top_three_changes` (`fips`, `county`, `state`, `rank`, `change`). These are the application's already-calculated scenarios.
+
+Missing values become the explicit string `Unavailable`, never zero or invented estimates. The model is instructed to use only this evidence, never recalculate scores, and explain unavailable evidence. It cannot infer rents, freight rates, tax incentives, property availability, delivery guarantees, hiring availability, property-level flood risk, or savings estimates. FEMA remains community hazard context; NWS remains point weather. Screening scores remain illustrative comparisons rather than validated recommendations.
+
+The output is labeled **AI-generated interpretation** with four sections: why the current leader ranks first, selected-county trade-offs, risk/resilience considerations, and data still missing for a real site decision. The prompt targets 200–250 words; responses exceeding 250 words including headings, incomplete responses, refusals, malformed results, and API errors fall back to an unavailable notice. Structure and length are checked in Python; prose grounding still needs human review. Existing code-generated evidence summaries remain available.
+
+Credentials are read only from Streamlit secrets or environment variables. Configure `OPENAI_API_KEY` in your private `.streamlit/secrets.toml` (already Git-ignored) or the environment. Optional settings are `OPENAI_MODEL` (default `gpt-4.1-mini`) and `AI_PROVIDER` (`openai` by default; `none` disables AI). Secrets take precedence over environment settings. For example, set these in your private secrets file, replacing the placeholder locally:
+
+```toml
+OPENAI_API_KEY = "your-api-key"
+OPENAI_MODEL = "gpt-4.1-mini"
+AI_PROVIDER = "openai"
+```
+
+No key is needed to use the deterministic app. Without a configured key, clicking the button shows **AI interpretation is not configured.** No model request occurs on ordinary slider, map, selection, or sensitivity changes. A saved interpretation is kept only in the current session and hidden when its evidence changes; another explicit click is required to regenerate it. Clicking the AI button sends supplied public-data evidence and your priorities/consumption input to OpenAI and may incur provider charges. Tests mock all model responses and require no live AI API.
 
 ## Rebuild the baseline
 
