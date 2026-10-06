@@ -109,7 +109,7 @@ def test_diagnostics_do_not_echo_sensitive_exception_text(monkeypatch):
     assert 'password' not in json.dumps(result) and 'secret' not in json.dumps(result)
 
 
-def test_forecast_failure_diagnostics_in_panel(monkeypatch):
+def test_forecast_failure_panel_hides_diagnostics(monkeypatch):
     import streamlit as st
     from streamlit.testing.v1 import AppTest
 
@@ -118,12 +118,14 @@ def test_forecast_failure_diagnostics_in_panel(monkeypatch):
     app = AppTest.from_file('../app.py', default_timeout=60).run()
     next(button for button in app.button if button.label == 'Check NWS forecast').click().run()
     assert not app.exception
-    diagnostics = next(json.loads(element.value) for element in app.json
-                       if 'exception_type' in element.value)
-    assert diagnostics == {'stage': 'forecast', 'exception_type': 'HTTPError',
-                           'http_status': 503, 'requested_url': FORECAST_URL,
-                           'message': 'HTTP 503: Service Unavailable'}
-    assert any('Point forecast unavailable' in warning.value for warning in app.warning)
+    assert not any('exception_type' in element.value for element in app.json)
+    assert [warning.value for warning in app.warning] == [
+        'Point forecast unavailable. Try again later.']
+    assert any(markdown.value == f'[NWS forecast source]({FORECAST_URL})'
+               for markdown in app.markdown)
+    for elements in (app.json, app.warning, app.caption, app.markdown):
+        assert not any('HTTPError' in element.value or 'HTTP 503' in element.value
+                       for element in elements)
     st.cache_data.clear()
 
 

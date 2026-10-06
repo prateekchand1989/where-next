@@ -230,14 +230,6 @@ if chosen:
                        alt='Next four NWS forecast periods at the selected county representative point')
                 else:
                     st.warning('Point forecast unavailable. Try again later.')
-                    # Temporary diagnostics for the live NWS request.
-                    st.json({
-                        'stage': forecast['stage'],
-                        'exception_type': forecast['error'],
-                        'http_status': forecast['http_status'],
-                        'requested_url': forecast['url'],
-                        'message': forecast['message'],
-                    })
                 st.markdown('[NWS forecast source](' + forecast['url'] + ')')
         st.caption('A point query does not cover every part of a county or a transport route. Weather does not change the investment score.')
 else:
