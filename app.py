@@ -6,10 +6,76 @@ from core import ROOT, LABELS, PRESETS, load_data, score_counties, evidence_brie
 from weather import get_alerts, get_forecast
 from fema import FIELDS as FEMA_FIELDS, NUMERIC_FIELDS as FEMA_NUMERIC_FIELDS, load_fema_context
 from interpretation import (SECTIONS, build_evidence, evidence_fingerprint,
-                            configured_provider, generate_interpretation)
+                            configured_provider, generate_interpretation, generate_answer)
 from streamlit.errors import StreamlitSecretNotFoundError
+from analysis_intent import STATES, parse_changes, change_lines, tile_summary
+from question_weather import enrich_weather
+from question_state import DEFAULT_SCENARIO, WEIGHT_KEYS, initialize_question_state, reset_for_new_question
 
-st.set_page_config(page_title='Where Next | Warehouse Location Intelligence', layout='wide')
+initialize_question_state(st.session_state)
+
+
+def submit_question(input_key):
+    question = st.session_state.get(input_key, '').strip()
+    if question:
+        st.session_state['submitted_question'] = question
+        st.session_state['pending_question'] = question
+        st.session_state['experience_mode'] = 'analysis'
+        st.session_state['view_mode'] = 'ask'
+
+
+def use_suggestion():
+    if st.session_state.get('suggested_question'):
+        st.session_state['landing_question'] = st.session_state['suggested_question']
+
+
+def start_new_question():
+    reset_for_new_question(st.session_state)
+
+
+st.set_page_config(page_title='Where Next | Warehouse Location Intelligence',
+                   layout='centered' if st.session_state['experience_mode'] == 'landing' else 'wide')
+if st.session_state['experience_mode'] == 'landing':
+    st.space('large')
+    st.title('Where Next?', text_alignment='center')
+    st.markdown('Warehouse location intelligence using public data', text_alignment='center')
+    st.space('medium')
+    st.text_area('Your warehouse question', key='landing_question', height=150,
+                 placeholder='Ask where your next warehouse should be...', label_visibility='collapsed')
+    st.button('Ask Where Next', key='ask_where_next', type='primary', width='stretch',
+              on_click=submit_question, args=('landing_question',))
+    st.pills('Try a question', [
+        'Where should I put a warehouse in the Northeast?',
+        'Which counties balance reach and labor cost best?',
+        'What are the strongest locations for a temperature-controlled facility?',
+        'Which locations have the lowest long-term risk?',
+        'Why does the current leader rank first?',
+        'Which locations should I investigate further?',
+    ], key='suggested_question', on_change=use_suggestion)
+    st.stop()
+
+def switch_view(mode):
+    st.session_state['view_mode'] = mode
+
+
+st.segmented_control('View', ['ask', 'dashboard'], key='view_mode',
+                     format_func=lambda mode: 'Ask Where Next' if mode == 'ask' else 'Dashboard',
+                     selection_mode='single', required=True, label_visibility='collapsed',
+                     persist_state='session')
+if st.session_state['view_mode'] == 'dashboard':
+    st.button('← Ask Where Next', key='return_to_ask', on_click=switch_view, args=('ask',))
+st.button('Start a new question', key='start_new_question', on_click=start_new_question)
+answer_slot = st.container()
+if st.session_state['view_mode'] == 'ask':
+    st.subheader('Your question')
+    if st.session_state['submitted_question']:
+        st.text(st.session_state['submitted_question'])
+    # Reserve answer above the input while computing current evidence later in the run.
+    answer_slot = st.container()
+    with st.container():
+        st.chat_input('Ask a follow-up', key='followup_question',
+                      on_submit=submit_question, args=('followup_question',))
+history_slot = st.container()
 st.title('Where Next?')
 st.markdown('### Warehouse Location Intelligence')
 st.write('Compare potential distribution locations using market reach, labor, workforce depth, electricity cost and operational context.')
@@ -34,9 +100,6 @@ def cached_forecast(lat, lon):
 def formatted_number(value, pattern):
     """Presentation only: keep unavailable figures explicit."""
     return format(value, pattern) if np.isfinite(value) else 'Unavailable'
-
-
-WEIGHT_KEYS = [f'priority_weight_{i}' for i in range(4)]
 
 
 def rebalance_priority_weights(changed_index):
@@ -64,15 +127,46 @@ def rebalance_priority_weights(changed_index):
 
 data, geometry = read_data()
 fema_context, fema_metadata = load_fema_context(data)
+# Consume the user trigger BEFORE rendering control widgets. Mutating their session
+# values here makes the normal deterministic run use the updated controls immediately.
+pending_question = st.session_state.pop('pending_question', None)
+if pending_question:
+    try:
+        ai_settings = {name: st.secrets.get(name) for name in
+                       ('AI_PROVIDER', 'OPENAI_API_KEY', 'OPENAI_MODEL') if name in st.secrets}
+    except StreamlitSecretNotFoundError:
+        ai_settings = {}
+    preset_before = st.session_state.get('scenario', DEFAULT_SCENARIO)
+    weights_before = [st.session_state.get(key, default)
+                      for key, default in zip(WEIGHT_KEYS, PRESETS[preset_before])]
+    states_before = st.session_state.get('candidate_states', list(STATES))
+    default_selection = score_counties(data, weights_before)
+    default_selection = default_selection[default_selection.complete & default_selection.state.isin(states_before)]
+    controls = {'scenario': preset_before, 'priority_weights': weights_before,
+                'candidate_states': states_before,
+                'selected_counties': st.session_state.get('chosen_counties', list(default_selection.head(3).fips))}
+    with st.spinner('Reading your analysis preferences...'):
+        changes = parse_changes(configured_provider(ai_settings), pending_question, controls, data)
+    if 'scenario' in changes:
+        st.session_state['scenario'] = changes['scenario']
+    if 'priority_weights' in changes:
+        for key, value in zip(WEIGHT_KEYS, changes['priority_weights']):
+            st.session_state[key] = value
+        st.session_state['weight_preset'] = changes.get('scenario', preset_before)
+    for field, widget_key in [('candidate_states', 'candidate_states'), ('selected_counties', 'chosen_counties')]:
+        if field in changes:
+            st.session_state[widget_key] = changes[field]
+    st.session_state['pending_answer'] = {'question': pending_question, 'changes': changes}
 with st.sidebar:
     st.header('Business priorities')
     st.caption('Define the screening question, then explore the trade-offs.')
     st.subheader('Scenario')
-    preset = st.selectbox('Scenario', list(PRESETS), label_visibility='collapsed')
+    preset = st.selectbox('Scenario', list(PRESETS), label_visibility='collapsed', key='scenario', persist_state='session')
     st.caption('Presets are illustrative, not industry standards.')
     st.subheader('Candidate states')
-    states = st.multiselect('Candidate states', ['MD', 'NJ', 'NY', 'OH', 'PA'],
-                            default=['MD', 'NJ', 'NY', 'OH', 'PA'], label_visibility='collapsed')
+    states = st.multiselect('Candidate states', STATES,
+                            default=None if 'candidate_states' in st.session_state else list(STATES), label_visibility='collapsed',
+                            key='candidate_states', persist_state='session')
     st.subheader('Business priority weights')
     if st.session_state.get('weight_preset') != preset:
         st.session_state['weight_preset'] = preset
@@ -82,7 +176,7 @@ with st.sidebar:
     weights = [
         st.slider(
             label, 0, 100, key=WEIGHT_KEYS[i],
-            on_change=rebalance_priority_weights, args=(i,)
+            on_change=rebalance_priority_weights, args=(i,), persist_state='session'
         )
         for i, label in enumerate(LABELS)
     ]
@@ -92,12 +186,16 @@ with st.sidebar:
     for label, weight in zip(LABELS, normalized_weights):
         st.caption(f'{label}: **{weight:.0f}%**')
     st.subheader('Map settings')
-    national = st.checkbox('Show contiguous U.S. overview', value=False)
+    national = st.checkbox('Show contiguous U.S. overview', value=False, key='national_map', persist_state='session')
     st.caption('Outside the five-state scope: no score. National outlines provide geographic context.')
 
 all_scored = score_counties(data, weights)
 view = all_scored[all_scored.state.isin(states)]
 if view.empty:
+    if st.session_state.get('question_answer'):
+        answer_slot.info('Your analysis has changed. Ask again for an updated answer.')
+    if st.session_state.pop('pending_answer', None):
+        answer_slot.info('Select at least one candidate state, then submit your question again.')
     st.warning('Select at least one candidate state.')
     st.stop()
 ranked = view[view.complete]
@@ -116,7 +214,7 @@ with map_column:
     with st.container(border=True):
         st.subheader('County screening map')
         map_view = st.selectbox('Map view', ['Warehouse screening score', 'FEMA risk context'],
-                                key='map_view')
+                                key='map_view', persist_state='session')
         fig = go.Figure()
         fig.add_trace(go.Choroplethmap(
             geojson=geometry, locations=[f['id'] for f in geometry['features']], z=[0] * len(geometry['features']),
@@ -182,8 +280,9 @@ with summary_column:
 st.subheader('County comparison')
 st.caption('Search any county in the selected states, including counties with incomplete labor data.')
 labels = dict(zip(view.fips, view.county + ', ' + view.state))
-chosen = st.multiselect('Choose up to three counties', list(labels), default=list(ranked.head(3).fips),
-                        format_func=lambda x: labels[x], max_selections=3)
+chosen = st.multiselect('Choose up to three counties', list(labels),
+                        default=None if 'chosen_counties' in st.session_state else list(ranked.head(3).fips),
+                        format_func=lambda x: labels[x], max_selections=3, key='chosen_counties', persist_state='session')
 if chosen:
     selected = all_scored.set_index('fips').loc[chosen].reset_index()
     with st.container(border=True):
@@ -206,7 +305,7 @@ if chosen:
 
     with st.expander('Illustrative annual electricity expense', expanded=True):
         annual_kwh = st.number_input('Annual electricity consumption (kWh)', min_value=0.0,
-                                    value=None, step=1000.0, key='annual_kwh')
+                                    value=None, step=1000.0, key='annual_kwh', persist_state='session')
         st.caption('Annual kWh × cents/kWh ÷ 100. Uses the 2024 state commercial average, not an actual property tariff or site quote. This expense does not change screening scores.')
         if annual_kwh is None:
             st.caption('Enter consumption to compare illustrative annual expenses.')
@@ -251,7 +350,7 @@ if chosen:
             st.session_state['weather_county'] = None
         current = st.selectbox('Weather at county representative point', chosen,
                                format_func=lambda x: labels[x], index=None,
-                               placeholder='Select a county for weather', key='weather_county')
+                               placeholder='Select a county for weather', key='weather_county', persist_state='session')
         if current is None:
             st.caption('Select a county for weather, then click an NWS button to check conditions.')
         else:
@@ -295,45 +394,133 @@ if chosen:
 else:
     st.caption('Select a county to inspect its indicators, electricity expense, and weather context.')
 
-st.subheader('Scenario sensitivity')
-st.caption('See how a single priority changes the shortlist, starting from your current weights.')
-factor = st.selectbox('Scoring factor to test', LABELS, key='sensitivity_factor')
+factor = st.session_state.get('sensitivity_factor', LABELS[0])
+if st.session_state['view_mode'] == 'dashboard':
+    st.subheader('How stable is this recommendation?')
+    st.caption('This tests whether the shortlist changes when one business priority is moved up or down by 10 percentage points.')
+    factor = st.selectbox('Business priority to test', LABELS, key='sensitivity_factor', persist_state='session')
 scenarios = weight_sensitivity(data, weights, LABELS.index(factor), states)
-winners = [s['top_five'].iloc[0] for s in scenarios if not s['top_five'].empty]
-if not winners:
-    st.info('No complete counties are available in the selected states for sensitivity analysis.')
-elif len({row.fips for row in winners}) == 1:
-    st.caption(f"**{winners[0]['county']}, {winners[0]['state']} remains first in all three scenarios.**")
-else:
-    st.caption('**The first-ranked county changes across these scenarios.**')
-for tab, scenario in zip(st.tabs(['Current', '−10 pp', '+10 pp']), scenarios):
-    with tab:
-        st.markdown('**' + scenario['name'] + '**')
-        st.caption(' · '.join(f'{label}: {weight:.2f}%' for label, weight in zip(LABELS, scenario['display_weights'])))
-        top = scenario['top_five'][['rank', 'county', 'state', 'score']].copy()
-        top['county'] = top['county'] + ', ' + top['state']
-        top = top.drop(columns='state').rename(columns={'rank': 'Rank', 'county': 'County / state', 'score': 'Score'})
-        st.dataframe(top, hide_index=True, width='stretch',
-                     column_config={'Score': st.column_config.NumberColumn(format='%.1f')})
-        st.markdown('**Top-three membership vs current weights**')
-        for _, row in scenario['top_three_changes'].iterrows():
-            with st.container(horizontal=True):
-                status_color = {'Remains top three': 'gray', 'Drops out of top three': 'orange', 'Enters top three': 'green'}[row['change']]
-                st.badge(row['change'], color=status_color)
-                st.write(f"{row['county']}, {row['state']} · rank {row['rank']}")
-with st.expander('How to read sensitivity results'):
-    st.write('The selected factor moves by up to 10 percentage points, capped at 0–100%. Other factors retain their relative proportions. If all other weights are zero, released weight is split equally among them.')
-    st.write('Weights are displayed to two decimals with rounding remainders allocated so each mix totals 100%. Scores use unrounded weights. Rankings use the complete five-state universe before filtering to your selected states.')
+if st.session_state['view_mode'] == 'dashboard':
+    winners = [s['top_five'].iloc[0] for s in scenarios if not s['top_five'].empty]
+    if not winners:
+        st.info('No complete counties are available in the selected states for sensitivity analysis.')
+    elif len({row.fips for row in winners}) == 1:
+        st.caption(f"**{winners[0]['county']}, {winners[0]['state']} remains first in all three scenarios.**")
+    else:
+        st.caption('**The first-ranked county changes across these scenarios.**')
+    for tab, scenario in zip(st.tabs(['Current', '−10 pp', '+10 pp']), scenarios):
+        with tab:
+            st.markdown('**' + scenario['name'] + '**')
+            st.caption(' · '.join(f'{label}: {weight:.2f}%' for label, weight in zip(LABELS, scenario['display_weights'])))
+            top = scenario['top_five'][['rank', 'county', 'state', 'score']].copy()
+            top['county'] = top['county'] + ', ' + top['state']
+            top = top.drop(columns='state').rename(columns={'rank': 'Rank', 'county': 'County / state', 'score': 'Score'})
+            st.dataframe(top, hide_index=True, width='stretch',
+                         column_config={'Score': st.column_config.NumberColumn(format='%.1f')})
+            st.markdown('**Top-three membership vs current weights**')
+            for _, row in scenario['top_three_changes'].iterrows():
+                with st.container(horizontal=True):
+                    status_color = {'Remains top three': 'gray', 'Drops out of top three': 'orange', 'Enters top three': 'green'}[row['change']]
+                    st.badge(row['change'], color=status_color)
+                    st.write(f"{row['county']}, {row['state']} · rank {row['rank']}")
+    with st.expander('How to read sensitivity results'):
+        st.write('The selected factor moves by up to 10 percentage points, capped at 0–100%. Other factors retain their relative proportions. If all other weights are zero, released weight is split equally among them.')
+        st.write('Weights are displayed to two decimals with rounding remainders allocated so each mix totals 100%. Scores use unrounded weights. Rankings use the complete five-state universe before filtering to your selected states.')
 
-if chosen:
-    with st.container(border=True):
-        st.subheader('Optional AI interpretation')
-        st.caption('Explain the supplied evidence and trade-offs. Scores and rankings stay calculated by Python. Clicking sends the evidence to the configured AI provider.')
-        evidence = build_evidence(selected, leader, weights, preset, states, annual_kwh,
-                                  fema_context, fema_metadata,
-                                  st.session_state.get('interpretation_weather', {}), factor, scenarios)
+# Fill the reserved top-of-page answer only after all current evidence is available.
+question_selected = all_scored.set_index('fips').loc[chosen].reset_index()
+def evidence_for_question(question):
+    return build_evidence(
+        question_selected, leader, weights, preset, states,
+        st.session_state.get('annual_kwh') if chosen else None,
+        fema_context, fema_metadata, st.session_state.get('interpretation_weather', {}),
+        factor, scenarios, scored=all_scored, ranked=ranked, question=question)
+
+
+pending_answer = st.session_state.pop('pending_answer', None)
+if pending_answer:
+    # Rank first, resolve the updated target, enrich weather, then rebuild evidence.
+    target_evidence = evidence_for_question(pending_answer['question'])
+    with answer_slot:
+        with st.spinner('Checking operational weather for your question...'):
+            enrich_weather(pending_answer['question'], target_evidence['question_context'], data,
+                           st.session_state.setdefault('interpretation_weather', {}),
+                           cached_weather, cached_forecast)
+question_evidence = evidence_for_question(st.session_state['submitted_question'])
+question_fingerprint = evidence_fingerprint(question_evidence)
+analysis_fingerprint = evidence_fingerprint(evidence_for_question(''))
+
+
+def turn_is_stale(turn):
+    # Compare each historical question with its own freshly rebuilt target context.
+    return turn['fingerprint'] != evidence_fingerprint(evidence_for_question(turn['question']))
+
+
+if pending_answer:
+    try:
+        ai_settings = {name: st.secrets.get(name) for name in
+                       ('AI_PROVIDER', 'OPENAI_API_KEY', 'OPENAI_MODEL') if name in st.secrets}
+    except StreamlitSecretNotFoundError:
+        ai_settings = {}
+    current_history = [
+        {'question': turn['question'], 'answer': turn['result'].get('answer', '')}
+        for turn in st.session_state['question_history']
+        if turn.get('analysis_fingerprint') == analysis_fingerprint and not turn_is_stale(turn)
+        and turn['result']['status'] == 'ok']
+    with answer_slot:
+        with st.spinner('Answering from updated supplied evidence...'):
+            answer = generate_answer(question_evidence, configured_provider(ai_settings),
+                                     pending_answer['question'], current_history, pending_answer['changes'])
+    turn = {'question': pending_answer['question'], 'fingerprint': question_fingerprint,
+            'result': answer, 'analysis_fingerprint': analysis_fingerprint,
+            'analysis_changed': bool(pending_answer['changes']),
+            'applied_changes': pending_answer['changes'],
+            'summary': tile_summary(answer, pending_answer['changes']),
+            'order': len(st.session_state['question_history']) + 1}
+    st.session_state['question_answer'] = turn
+    st.session_state['question_history'].append(turn)
+
+
+def render_turn(turn):
+    if turn.get('analysis_changed'):
+        st.caption('Analysis updated')
+        st.markdown('**What changed**\n' + '\n'.join('- ' + line for line in change_lines(turn['applied_changes'])))
+    if turn_is_stale(turn):
+        st.info('Your analysis has changed. Ask again for an updated answer.')
+        st.caption('Saved answer from earlier evidence')
+    elif turn['result']['status'] == 'ok':
+        st.markdown('**AI-generated answer**')
+    if turn['result']['status'] == 'ok':
+        st.markdown(turn['result']['answer'])
+    else:
+        st.info(turn['result']['message'])
+
+
+saved_answer = st.session_state.get('question_answer')
+if st.session_state['view_mode'] == 'ask':
+    with answer_slot:
+        if saved_answer:
+            with st.container(border=True, key='latest_answer'):
+                st.subheader('Latest answer')
+                with st.expander(saved_answer['question'], expanded=True, key=f"latest_response_{saved_answer.get('order', 0)}"):
+                    render_turn(saved_answer)
+                st.button('Open full dashboard →', key='open_dashboard', on_click=switch_view, args=('dashboard',))
+    with history_slot:
+        for turn in reversed(st.session_state['question_history'][:-1]):
+            stale = turn_is_stale(turn)
+            summary = turn.get('summary') or tile_summary(turn['result'], turn.get('applied_changes', {}))
+            indicator = ' • Analysis updated' if turn.get('analysis_changed') else ''
+            if stale:
+                indicator += ' • Analysis changed since answer'
+            label = turn['question'] + ' — ' + summary + indicator
+            with st.expander(label, expanded=False, key=f"response_{turn.get('order', st.session_state['question_history'].index(turn))}"):
+                render_turn(turn)
+
+if st.session_state['view_mode'] == 'dashboard':
+    with st.expander('Overall summary', expanded=False):
+        evidence = evidence_for_question('')
         fingerprint = evidence_fingerprint(evidence)
-        if st.button('Explain selected locations', key='explain_locations'):
+        if st.button('Generate overall summary', key='overall_summary'):
             try:
                 ai_settings = {name: st.secrets.get(name) for name in
                                ('AI_PROVIDER', 'OPENAI_API_KEY', 'OPENAI_MODEL') if name in st.secrets}
@@ -346,14 +533,14 @@ if chosen:
         saved_interpretation = st.session_state.get('location_interpretation')
         if saved_interpretation:
             if saved_interpretation['fingerprint'] != fingerprint:
-                st.caption('Evidence changed. Click Explain selected locations for an updated interpretation.')
+                st.caption('Evidence changed. Click Generate overall summary for an updated interpretation.')
             else:
                 interpretation = saved_interpretation['result']
                 if interpretation['status'] == 'ok':
                     st.markdown('**AI-generated interpretation**')
                     for key, heading in SECTIONS.items():
                         st.markdown('**' + heading + '**')
-                        st.text(interpretation['sections'][key])
+                        st.markdown(interpretation['sections'][key])
                     st.caption('Review against the supplied evidence; this is an illustrative screening interpretation.')
                 else:
                     st.info(interpretation['message'])
@@ -374,7 +561,7 @@ with st.expander('Data coverage & methodology'):
     st.write('Reach counts U.S. county populations whose representative points fall within 250 straight-line miles. It is a coarse proxy; no road routing or carrier delivery promise is inferred. Border-area population outside the U.S. is excluded.')
     st.write('Average industry annual pay is not an hourly job-offer wage. Employment is existing workforce depth, not available jobseekers. State commercial electricity averages are not property tariffs. No rent, building availability, tax incentives, freight quotes, or property flood assessment is included.')
     st.write('Each factor uses percentile rank among the fixed complete five-state candidate set. Lower costs get higher component scores. Incomplete candidates are not scored. Small employment bases can produce unstable comparisons; investigate the underlying records.')
-    st.caption('Optional AI interpretation explains supplied evidence. FEMA hazard context remains separate from screening scores.')
+    st.caption('Ask Where Next explains supplied evidence. FEMA hazard context remains separate from screening scores.')
     st.json(json.loads((ROOT / 'data/sources.json').read_text()))
 st.download_button('Download current county results', view.to_csv(index=False),
                    file_name='where-next-results.csv', mime='text/csv')

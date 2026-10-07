@@ -115,7 +115,9 @@ def test_forecast_failure_panel_hides_diagnostics(monkeypatch):
 
     st.cache_data.clear()
     mock_responses(monkeypatch, POINTS, HTTPError(FORECAST_URL, 503, 'Unavailable', {}, None))
-    app = AppTest.from_file('../app.py', default_timeout=60).run()
+    app = AppTest.from_file('../app.py', default_timeout=60)
+    app.session_state['experience_mode'] = 'analysis'
+    app.run()
     comparison = next(widget for widget in app.multiselect if widget.label == 'Choose up to three counties')
     app.selectbox(key='weather_county').select(comparison.value[0]).run()
     next(button for button in app.button if button.label == 'Check NWS forecast').click().run()
@@ -147,7 +149,9 @@ def test_forecast_panel_and_cache(monkeypatch):
 
     st.cache_data.clear()
     calls = mock_responses(monkeypatch, POINTS, FORECAST)
-    app = AppTest.from_file('../app.py', default_timeout=60).run()
+    app = AppTest.from_file('../app.py', default_timeout=60)
+    app.session_state['experience_mode'] = 'analysis'
+    app.run()
     assert not app.exception
     comparison = next(widget for widget in app.multiselect if widget.label == 'Choose up to three counties')
     app.selectbox(key='weather_county').select(comparison.value[0]).run()
@@ -172,7 +176,9 @@ def test_weather_selector_starts_empty_and_handles_comparison_changes(monkeypatc
 
     st.cache_data.clear()
     calls = mock_responses(monkeypatch)
-    app = AppTest.from_file('../app.py', default_timeout=60).run()
+    app = AppTest.from_file('../app.py', default_timeout=60)
+    app.session_state['experience_mode'] = 'analysis'
+    app.run()
     assert not app.exception
     assert app.selectbox(key='weather_county').value is None
     assert app.selectbox(key='weather_county').proto.placeholder == 'Select a county for weather'
@@ -210,7 +216,9 @@ def test_weather_requests_require_selection_and_button_click(monkeypatch):
 
     st.cache_data.clear()
     calls = mock_responses(monkeypatch, TimeoutError(), TimeoutError())
-    app = AppTest.from_file('../app.py', default_timeout=60).run()
+    app = AppTest.from_file('../app.py', default_timeout=60)
+    app.session_state['experience_mode'] = 'analysis'
+    app.run()
     next(widget for widget in app.multiselect
          if widget.label == 'Choose up to three counties').set_value(['42069']).run()
     assert not calls

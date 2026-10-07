@@ -51,7 +51,8 @@ def evidence():
 
 def test_structured_evidence_allowlist_and_missing_values(evidence):
     assert set(evidence) == {'schema_version', 'baseline_year', 'scenario', 'candidate_states',
-        'priority_weights_pct', 'current_leader', 'selected_counties',
+        'priority_weights_pct', 'current_leader', 'current_top_five', 'selected_counties',
+        'question_target_counties', 'question_context',
         'annual_electricity_consumption_kwh', 'fema_source', 'sensitivity'}
     county = evidence['selected_counties'][0]
     assert set(county) == {*COUNTY_FIELDS, 'percentile_components',
@@ -148,7 +149,7 @@ def test_api_failure_is_safe(monkeypatch, evidence, failure):
 
 @pytest.mark.parametrize('payload', [response_payload(status='incomplete'),
     response_payload({'leader': 'Missing sections'}),
-    response_payload({key: 'word ' * 100 for key in SECTIONS}),
+    response_payload({key: 'word ' * 150 for key in SECTIONS}),
     {'status': 'completed', 'output': [{'type': 'message', 'content': [{'type': 'refusal'}]}]}])
 def test_invalid_or_overlong_output_falls_back(monkeypatch, evidence, payload):
     mocked_model(monkeypatch, payload=payload)
@@ -161,6 +162,8 @@ def make_app():
     app.secrets['OPENAI_API_KEY'] = 'test-key'
     app.secrets['AI_PROVIDER'] = 'openai'
     app.secrets['OPENAI_MODEL'] = 'gpt-4.1-mini'
+    app.session_state['experience_mode'] = 'analysis'
+    app.session_state['view_mode'] = 'dashboard'
     return app.run()
 
 
@@ -171,9 +174,11 @@ def test_app_without_key(monkeypatch):
     app = AppTest.from_file('../app.py', default_timeout=60)
     app.secrets['OPENAI_API_KEY'] = ''
     app.secrets['AI_PROVIDER'] = 'openai'
+    app.session_state['experience_mode'] = 'analysis'
+    app.session_state['view_mode'] = 'dashboard'
     app.run()
     assert not app.exception
-    app.button(key='explain_locations').click().run()
+    app.button(key='overall_summary').click().run()
     assert not app.exception and not calls
     assert any(info.value == 'AI interpretation is not configured.' for info in app.info)
 
@@ -183,10 +188,10 @@ def test_app_button_only_labeled_output_and_invalidated_evidence(monkeypatch):
     app = make_app()
     assert not app.exception and not calls
     baseline_metrics = [metric.value for metric in app.metric]
-    app.button(key='explain_locations').click().run()
+    app.button(key='overall_summary').click().run()
     assert not app.exception and len(calls) == 1
     assert any(markdown.value == '**AI-generated interpretation**' for markdown in app.markdown)
-    assert [text.value for text in app.text] == list(MOCK_SECTIONS.values())
+    assert [text.value for text in app.markdown if text.value in MOCK_SECTIONS.values()] == list(MOCK_SECTIONS.values())
     assert [metric.value for metric in app.metric] == baseline_metrics
     assert any(expander.label == 'County evidence summaries' for expander in app.expander)
     app.selectbox(key='map_view').select('FEMA risk context').run()
@@ -201,7 +206,7 @@ def test_app_button_only_labeled_output_and_invalidated_evidence(monkeypatch):
 def test_app_api_failure_falls_back(monkeypatch):
     calls = mocked_model(monkeypatch, failure=TimeoutError('private-key'))
     app = make_app()
-    app.button(key='explain_locations').click().run()
+    app.button(key='overall_summary').click().run()
     assert not app.exception and len(calls) == 1
     assert any('AI interpretation unavailable' in info.value for info in app.info)
     assert not any('private-key' in info.value for info in app.info)
@@ -230,7 +235,7 @@ def test_app_uses_session_forecast_without_fetching_weather_for_ai(monkeypatch):
     app.selectbox(key='weather_county').select('42069').run()
     next(button for button in app.button if button.label == 'Check NWS forecast').click().run()
     assert not app.exception and len(weather_calls) == 1 and not calls
-    app.button(key='explain_locations').click().run()
+    app.button(key='overall_summary').click().run()
     assert not app.exception and len(weather_calls) == 1 and len(calls) == 1
     body = json.loads(calls[0][0].data)
     supplied = json.loads(body['input'][0]['content'])['selected_counties'][0]['nws']

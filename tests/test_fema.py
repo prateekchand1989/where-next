@@ -96,7 +96,9 @@ def test_app_usable_without_fema(monkeypatch, tmp_path):
 
     monkeypatch.setattr('fema.load_fema_context', unavailable)
     st.cache_data.clear()
-    app = AppTest.from_file('../app.py', default_timeout=60).run()
+    app = AppTest.from_file('../app.py', default_timeout=60)
+    app.session_state['experience_mode'] = 'analysis'
+    app.run()
     assert not app.exception
     assert any('FEMA hazard data unavailable' in element.value for element in app.info)
     assert any(frame.value.columns.tolist()[0] == 'County' for frame in app.dataframe)
@@ -121,7 +123,9 @@ def test_app_fema_context_and_map_with_fixture(monkeypatch, source, tmp_path):
         'source_url': 'https://services.arcgis.com/example'}))
     monkeypatch.setattr('fema.load_fema_context', lambda counties: load_fema_context(counties, tmp_path))
     st.cache_data.clear()
-    app = AppTest.from_file('../app.py', default_timeout=60).run()
+    app = AppTest.from_file('../app.py', default_timeout=60)
+    app.session_state['experience_mode'] = 'analysis'
+    app.run()
     next(widget for widget in app.multiselect if widget.label == 'Choose up to three counties').set_value(['42069']).run()
     assert not app.exception
     panel = next(frame.value for frame in app.dataframe if 'Overall FEMA risk score' in frame.value.columns)
