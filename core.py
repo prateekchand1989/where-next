@@ -58,13 +58,13 @@ def sensitivity_weights(weights, factor, change):
     return adjusted.tolist()
 
 
-def weight_sensitivity(data, weights, factor, states):
+def weight_sensitivity(data, weights, factor, states, current_scored=None):
     """Rank all complete candidates before filtering; compare top-three membership."""
     scenarios = []
     for name, change in [('Current weight', 0), ('Selected factor minus 10 percentage points', -10),
                          ('Selected factor plus 10 percentage points', 10)]:
         adjusted = sensitivity_weights(weights, factor, change)
-        scored = score_counties(data, adjusted)
+        scored = current_scored if change == 0 and current_scored is not None else score_counties(data, adjusted)
         ranked = scored[scored.complete & scored.state.isin(states)].copy()
         ranked['rank'] = np.arange(1, len(ranked) + 1)
         # Largest-remainder rounding for display only: exactly 10,000 basis points.

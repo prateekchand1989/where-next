@@ -6,11 +6,12 @@ from core import ROOT, LABELS, PRESETS, load_data, score_counties, evidence_brie
 from weather import get_alerts, get_forecast
 from fema import FIELDS as FEMA_FIELDS, NUMERIC_FIELDS as FEMA_NUMERIC_FIELDS, load_fema_context
 from interpretation import (SECTIONS, build_evidence, evidence_fingerprint,
-                            configured_provider, generate_interpretation, generate_answer)
+                            configured_provider, generate_interpretation, generate_answer, render_answer_markdown)
 from streamlit.errors import StreamlitSecretNotFoundError
 from analysis_intent import STATES, parse_changes, change_lines, tile_summary
 from question_weather import enrich_weather
-from question_state import DEFAULT_SCENARIO, WEIGHT_KEYS, initialize_question_state, reset_for_new_question
+from summary_cards import summary_cards_html
+from question_state import DEFAULT_SCENARIO, WEIGHT_KEYS, initialize_question_state, reset_for_new_question, sync_county_state
 
 initialize_question_state(st.session_state)
 
@@ -123,6 +124,14 @@ def rebalance_priority_weights(changed_index):
 
     for index, value in zip(other_indices, floored):
         st.session_state[WEIGHT_KEYS[index]] = int(value)
+    st.session_state['weight_preset'] = st.session_state['scenario']
+
+
+def apply_scenario_preset():
+    preset = st.session_state['scenario']
+    for key, value in zip(WEIGHT_KEYS, PRESETS[preset]):
+        st.session_state[key] = int(value)
+    st.session_state['weight_preset'] = preset
 
 
 data, geometry = read_data()
@@ -140,11 +149,9 @@ if pending_question:
     weights_before = [st.session_state.get(key, default)
                       for key, default in zip(WEIGHT_KEYS, PRESETS[preset_before])]
     states_before = st.session_state.get('candidate_states', list(STATES))
-    default_selection = score_counties(data, weights_before)
-    default_selection = default_selection[default_selection.complete & default_selection.state.isin(states_before)]
     controls = {'scenario': preset_before, 'priority_weights': weights_before,
                 'candidate_states': states_before,
-                'selected_counties': st.session_state.get('chosen_counties', list(default_selection.head(3).fips))}
+                'selected_counties': st.session_state.get('chosen_counties', [])}
     with st.spinner('Reading your analysis preferences...'):
         changes = parse_changes(configured_provider(ai_settings), pending_question, controls, data)
     if 'scenario' in changes:
@@ -156,12 +163,14 @@ if pending_question:
     for field, widget_key in [('candidate_states', 'candidate_states'), ('selected_counties', 'chosen_counties')]:
         if field in changes:
             st.session_state[widget_key] = changes[field]
+    if 'selected_counties' in changes:
+        st.session_state['comparison_manual'] = True
     st.session_state['pending_answer'] = {'question': pending_question, 'changes': changes}
 with st.sidebar:
     st.header('Business priorities')
     st.caption('Define the screening question, then explore the trade-offs.')
     st.subheader('Scenario')
-    preset = st.selectbox('Scenario', list(PRESETS), label_visibility='collapsed', key='scenario', persist_state='session')
+    preset = st.selectbox('Scenario', list(PRESETS), label_visibility='collapsed', key='scenario', persist_state='session', on_change=apply_scenario_preset)
     st.caption('Presets are illustrative, not industry standards.')
     st.subheader('Candidate states')
     states = st.multiselect('Candidate states', STATES,
@@ -169,9 +178,7 @@ with st.sidebar:
                             key='candidate_states', persist_state='session')
     st.subheader('Business priority weights')
     if st.session_state.get('weight_preset') != preset:
-        st.session_state['weight_preset'] = preset
-        for key, default in zip(WEIGHT_KEYS, PRESETS[preset]):
-            st.session_state[key] = int(default)
+        apply_scenario_preset()
 
     weights = [
         st.slider(
@@ -191,6 +198,10 @@ with st.sidebar:
 
 all_scored = score_counties(data, weights)
 view = all_scored[all_scored.state.isin(states)]
+ranked = view[view.complete]
+# All live displays and evidence share this score-first, filter-second result.
+sync_county_state(st.session_state, all_scored, ranked, states, pending_question,
+                  weights=weights, scenario=preset)
 if view.empty:
     if st.session_state.get('question_answer'):
         answer_slot.info('Your analysis has changed. Ask again for an updated answer.')
@@ -198,15 +209,28 @@ if view.empty:
         answer_slot.info('Select at least one candidate state, then submit your question again.')
     st.warning('Select at least one candidate state.')
     st.stop()
-ranked = view[view.complete]
 leader = ranked.iloc[0] if not ranked.empty else None
-metrics = st.columns(4, gap='medium', wrap=True)
-metrics[0].metric('Counties evaluated', len(view), border=True)
-metrics[1].metric('Complete scoring data', len(ranked), border=True)
-with metrics[2].container(border=True):
-    st.caption('Current #1 county')
-    st.markdown(f"**{leader['county']}, {leader['state']}**" if leader is not None else '**Unavailable**')
-metrics[3].metric('Current #1 screening score', f"{leader['score']:.1f} / 100" if leader is not None else 'Unavailable', border=True)
+if ranked.empty:
+    st.warning('No counties with complete scoring data are available in the selected states. Rankings are unavailable.')
+highlight_fips = st.session_state.get('highlighted_fips')
+highlight_rank = st.session_state.get('highlighted_rank')
+highlighted = all_scored.set_index('fips', drop=False).loc[highlight_fips] if highlight_fips else None
+def highlighted_value(field, pattern, prefix='', suffix=''):
+    if highlighted is None or not np.isfinite(highlighted[field]):
+        return 'Unavailable'
+    return prefix + formatted_number(highlighted[field], pattern) + suffix
+
+with st.container(key='highlighted_county'):
+    st.html(summary_cards_html([
+        (f'Current #{highlight_rank} county' if highlight_rank else 'Selected county',
+         f"{highlighted['county']}, {highlighted['state']}" if highlighted is not None else 'Unavailable',
+         'Screening score: ' + highlighted_value('score', '.1f', suffix=' / 100')),
+        ('Warehousing employment', highlighted_value('employment', ',.0f'), 'Existing warehousing workforce depth'),
+        ('Average annual pay', highlighted_value('annual_pay', ',.0f', prefix='$'), '2024 industry labor benchmark'),
+        ('Electricity benchmark', highlighted_value('electricity_cents_kwh', '.2f', suffix=' ¢/kWh'),
+         '2024 state commercial electricity benchmark'),
+    ]))
+st.caption(f'{len(view)} counties evaluated · {len(ranked)} with complete scoring data.')
 st.caption(f'{len(view) - len(ranked)} incomplete counties in the current selection remain unranked and searchable. Scores use the fixed complete five-state reference set before state filtering.')
 
 map_column, summary_column = st.columns([3, 1.35], gap='large', wrap=True)
@@ -250,6 +274,12 @@ with map_column:
                 st.caption('FEMA community risk context · Higher means higher relative risk. Gray = unavailable or outside selected scope. Warehouse rankings remain unchanged.')
             else:
                 st.info('FEMA risk context unavailable. Warehouse screening remains available.')
+        if highlighted is not None:
+            fig.add_trace(go.Scattermap(lon=[highlighted['lon']], lat=[highlighted['lat']],
+                                       mode='markers', marker={'size': 14, 'color': '#243746', 'opacity': 0.75},
+                                       name='Highlighted county', showlegend=False,
+                                       text=[f"{highlighted['county']}, {highlighted['state']}"],
+                                       hovertemplate='<b>%{text}</b><extra>Highlighted county</extra>'))
         fig.update_layout(
             map={'style': 'white-bg', 'center': {'lon': -98 if national else -77.8, 'lat': 39 if national else 40.2},
                  'zoom': 2.6 if national else 4.3},
@@ -280,9 +310,12 @@ with summary_column:
 st.subheader('County comparison')
 st.caption('Search any county in the selected states, including counties with incomplete labor data.')
 labels = dict(zip(view.fips, view.county + ', ' + view.state))
+def mark_manual_comparison():
+    st.session_state['comparison_manual'] = True
+
 chosen = st.multiselect('Choose up to three counties', list(labels),
                         default=None if 'chosen_counties' in st.session_state else list(ranked.head(3).fips),
-                        format_func=lambda x: labels[x], max_selections=3, key='chosen_counties', persist_state='session')
+                        format_func=lambda x: labels[x], max_selections=3, key='chosen_counties', persist_state='session', on_change=mark_manual_comparison)
 if chosen:
     selected = all_scored.set_index('fips').loc[chosen].reset_index()
     with st.container(border=True):
@@ -399,7 +432,7 @@ if st.session_state['view_mode'] == 'dashboard':
     st.subheader('How stable is this recommendation?')
     st.caption('This tests whether the shortlist changes when one business priority is moved up or down by 10 percentage points.')
     factor = st.selectbox('Business priority to test', LABELS, key='sensitivity_factor', persist_state='session')
-scenarios = weight_sensitivity(data, weights, LABELS.index(factor), states)
+scenarios = weight_sensitivity(data, weights, LABELS.index(factor), states, current_scored=all_scored)
 if st.session_state['view_mode'] == 'dashboard':
     winners = [s['top_five'].iloc[0] for s in scenarios if not s['top_five'].empty]
     if not winners:
@@ -434,7 +467,8 @@ def evidence_for_question(question):
         question_selected, leader, weights, preset, states,
         st.session_state.get('annual_kwh') if chosen else None,
         fema_context, fema_metadata, st.session_state.get('interpretation_weather', {}),
-        factor, scenarios, scored=all_scored, ranked=ranked, question=question)
+        factor, scenarios, scored=all_scored, ranked=ranked, question=question,
+        highlighted_fips=st.session_state.get('highlighted_fips'))
 
 
 pending_answer = st.session_state.pop('pending_answer', None)
@@ -491,7 +525,10 @@ def render_turn(turn):
     elif turn['result']['status'] == 'ok':
         st.markdown('**AI-generated answer**')
     if turn['result']['status'] == 'ok':
-        st.markdown(turn['result']['answer'])
+        try:
+            st.markdown(render_answer_markdown(turn['result'].get('structured_answer')))
+        except ValueError:
+            st.info('Saved answer format is unavailable. Ask again for an updated answer.')
     else:
         st.info(turn['result']['message'])
 
