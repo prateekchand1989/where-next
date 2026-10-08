@@ -23,7 +23,7 @@ def assert_current_panels(app):
     assert app.session_state['highlighted_fips'] == leader.fips
     assert app.session_state['highlighted_rank'] == 1
     assert 'Current #1 county' in card_html(app)
-    assert card_values(app) == [f'{leader.county}, {leader.state}', f'{leader.employment:,.0f}',
+    assert card_values(app)[:4] == [f'{leader.county}, {leader.state}', f'{leader.employment:,.0f}',
                                f'${leader.annual_pay:,.0f}', f'{leader.electricity_cents_kwh:.2f} ¢/kWh']
     top_five = [item.value for item in app.markdown if item.value.startswith('**1. ') or
                 any(item.value.startswith(f'**{rank}. ') for rank in range(2, 6))]
@@ -109,7 +109,7 @@ def test_no_complete_counties_clears_stale_highlight(monkeypatch):
     assert not app.exception and len(calls) == 2
     assert app.session_state['highlighted_fips'] is None
     assert app.session_state['highlighted_rank'] is None
-    assert card_values(app) == ['Unavailable'] * 4
+    assert card_values(app) == ['Unavailable'] * 5
     assert any('No counties with complete scoring data' in item.value for item in app.warning)
     assert any('No complete counties' in item.value for item in app.caption)
     chart = next(item for item in app.get('plotly_chart') if item.key == 'county_map')

@@ -11,6 +11,8 @@ from streamlit.errors import StreamlitSecretNotFoundError
 from analysis_intent import STATES, parse_changes, change_lines, tile_summary
 from question_weather import enrich_weather
 from summary_cards import summary_cards_html
+from ui_styles import application_styles
+from cost_panel import render_cost_panel, dollars
 from question_state import DEFAULT_SCENARIO, WEIGHT_KEYS, initialize_question_state, reset_for_new_question, sync_county_state
 
 initialize_question_state(st.session_state)
@@ -36,23 +38,26 @@ def start_new_question():
 
 st.set_page_config(page_title='Where Next | Warehouse Location Intelligence',
                    layout='centered' if st.session_state['experience_mode'] == 'landing' else 'wide')
+st.html(application_styles(landing=st.session_state['experience_mode'] == 'landing'))
 if st.session_state['experience_mode'] == 'landing':
-    st.space('large')
-    st.title('Where Next?', text_alignment='center')
-    st.markdown('Warehouse location intelligence using public data', text_alignment='center')
-    st.space('medium')
-    st.text_area('Your warehouse question', key='landing_question', height=150,
-                 placeholder='Ask where your next warehouse should be...', label_visibility='collapsed')
-    st.button('Ask Where Next', key='ask_where_next', type='primary', width='stretch',
-              on_click=submit_question, args=('landing_question',))
-    st.pills('Try a question', [
-        'Where should I put a warehouse in the Northeast?',
-        'Which counties balance reach and labor cost best?',
-        'What are the strongest locations for a temperature-controlled facility?',
-        'Which locations have the lowest long-term risk?',
-        'Why does the current leader rank first?',
-        'Which locations should I investigate further?',
-    ], key='suggested_question', on_change=use_suggestion)
+    with st.container(key='landing_experience'):
+        st.space('large')
+        st.title('Where Next?', text_alignment='center')
+        st.markdown('Warehouse location intelligence using public data', text_alignment='center')
+        st.space('medium')
+        with st.container(key='landing_panel'):
+            st.text_area('Your warehouse question', key='landing_question', height=150,
+                         placeholder='Ask where your next warehouse should be...', label_visibility='collapsed')
+            st.button('Ask Where Next', key='ask_where_next', type='primary', width='stretch',
+                      on_click=submit_question, args=('landing_question',))
+        st.pills('Try a question', [
+            'Where should I put a warehouse in the Northeast?',
+            'Which counties balance reach and labor cost best?',
+            'What are the strongest locations for a temperature-controlled facility?',
+            'Which locations have the lowest long-term risk?',
+            'Why does the current leader rank first?',
+            'Which locations should I investigate further?',
+        ], key='suggested_question', on_change=use_suggestion)
     st.stop()
 
 def switch_view(mode):
@@ -76,7 +81,7 @@ if st.session_state['view_mode'] == 'ask':
     with st.container():
         st.chat_input('Ask a follow-up', key='followup_question',
                       on_submit=submit_question, args=('followup_question',))
-history_slot = st.container()
+history_slot = st.container(key='history_answers')
 st.title('Where Next?')
 st.markdown('### Warehouse Location Intelligence')
 st.write('Compare potential distribution locations using market reach, labor, workforce depth, electricity cost and operational context.')
@@ -187,6 +192,7 @@ with st.sidebar:
         )
         for i, label in enumerate(LABELS)
     ]
+    st.button('Default Weights', key='default_weights', on_click=apply_scenario_preset, width='stretch')
     st.caption('Move any slider and the other three rebalance automatically so the total remains 100%.')
     st.caption(f"Current total: **{sum(weights)}%**")
     normalized_weights = np.asarray(weights, dtype=float)
@@ -220,7 +226,9 @@ def highlighted_value(field, pattern, prefix='', suffix=''):
         return 'Unavailable'
     return prefix + formatted_number(highlighted[field], pattern) + suffix
 
-with st.container(key='highlighted_county'):
+summary_slot = st.container(key='highlighted_county')
+operating_cost = render_cost_panel(ranked, preset)
+with summary_slot:
     st.html(summary_cards_html([
         (f'Current #{highlight_rank} county' if highlight_rank else 'Selected county',
          f"{highlighted['county']}, {highlighted['state']}" if highlighted is not None else 'Unavailable',
@@ -229,83 +237,87 @@ with st.container(key='highlighted_county'):
         ('Average annual pay', highlighted_value('annual_pay', ',.0f', prefix='$'), '2024 industry labor benchmark'),
         ('Electricity benchmark', highlighted_value('electricity_cents_kwh', '.2f', suffix=' ¢/kWh'),
          '2024 state commercial electricity benchmark'),
+        ('Estimated Annual Cost / Sq Ft',
+         dollars(operating_cost['annual_psf']) + (' / sq ft / year' if operating_cost['annual_psf'] is not None else ''),
+         'Illustrative warehouse operating cost based on selected facility assumptions.'),
     ]))
 st.caption(f'{len(view)} counties evaluated · {len(ranked)} with complete scoring data.')
 st.caption(f'{len(view) - len(ranked)} incomplete counties in the current selection remain unranked and searchable. Scores use the fixed complete five-state reference set before state filtering.')
 
-map_column, summary_column = st.columns([3, 1.35], gap='large', wrap=True)
-with map_column:
-    with st.container(border=True):
-        st.subheader('County screening map')
-        map_view = st.selectbox('Map view', ['Warehouse screening score', 'FEMA risk context'],
-                                key='map_view', persist_state='session')
-        fig = go.Figure()
-        fig.add_trace(go.Choroplethmap(
-            geojson=geometry, locations=[f['id'] for f in geometry['features']], z=[0] * len(geometry['features']),
-            colorscale=[[0, '#e6e8eb'], [1, '#e6e8eb']], showscale=False,
-            marker_line_width=0.25, marker_line_color='#ffffff', hoverinfo='skip'))
-        if map_view == 'Warehouse screening score' and not ranked.empty:
+with st.container(key='map_rankings'):
+    map_column, summary_column = st.columns([3, 1.35], gap='large', wrap=True)
+    with map_column:
+        with st.container(key='screening_map'):
+            st.subheader('County screening map')
+            map_view = st.selectbox('Map view', ['Warehouse screening score', 'FEMA risk context'],
+                                    key='map_view', persist_state='session')
+            fig = go.Figure()
             fig.add_trace(go.Choroplethmap(
-                geojson=geometry, locations=ranked.fips, z=ranked.score,
-                text=ranked.county + ', ' + ranked.state, colorscale='Teal', zmin=0, zmax=100,
-                customdata=ranked[['reach_250mi', 'employment', 'annual_pay', 'electricity_cents_kwh']].to_numpy(),
-                marker_line_width=0.5, marker_line_color='#ffffff', colorbar_title='Score',
-                hovertemplate=(
-                    '<b>%{text}</b><br>Screening score: %{z:.1f}/100'
-                    '<br>Population within 250 miles: %{customdata[0]:,.0f}'
-                    '<br>Warehousing employment: %{customdata[1]:,.0f}'
-                    '<br>Average annual pay: $%{customdata[2]:,.0f}'
-                    '<br>Electricity benchmark: %{customdata[3]:.2f} cents/kWh<extra></extra>')))
-        elif map_view == 'FEMA risk context':
-            if fema_metadata['status'] == 'ok':
-                hazard_map = view[['fips', 'county', 'state']].merge(
-                    fema_context[['fips', 'RISK_SCORE', 'RISK_RATNG']],
-                    on='fips', how='left', validate='one_to_one')
-                hazard_map = hazard_map[hazard_map.RISK_SCORE.notna()]
+                geojson=geometry, locations=[f['id'] for f in geometry['features']], z=[0] * len(geometry['features']),
+                colorscale=[[0, '#e6e8eb'], [1, '#e6e8eb']], showscale=False,
+                marker_line_width=0.25, marker_line_color='#ffffff', hoverinfo='skip'))
+            if map_view == 'Warehouse screening score' and not ranked.empty:
                 fig.add_trace(go.Choroplethmap(
-                    geojson=geometry, locations=hazard_map.fips, z=hazard_map.RISK_SCORE,
-                    text=hazard_map.county + ', ' + hazard_map.state,
-                    customdata=hazard_map[['RISK_RATNG']].fillna('Unavailable').to_numpy(),
-                    colorscale='YlOrRd', zmin=0, zmax=100,
-                    marker_line_width=0.5, marker_line_color='#ffffff',
-                    colorbar_title='FEMA risk',
-                    hovertemplate=('<b>%{text}</b><br>FEMA risk score: %{z:.1f}/100'
-                                   '<br>FEMA rating: %{customdata[0]}<extra></extra>')))
-                st.caption('FEMA community risk context · Higher means higher relative risk. Gray = unavailable or outside selected scope. Warehouse rankings remain unchanged.')
+                    geojson=geometry, locations=ranked.fips, z=ranked.score,
+                    text=ranked.county + ', ' + ranked.state, colorscale='Teal', zmin=0, zmax=100,
+                    customdata=ranked[['reach_250mi', 'employment', 'annual_pay', 'electricity_cents_kwh']].to_numpy(),
+                    marker_line_width=0.5, marker_line_color='#ffffff', colorbar_title='Score',
+                    hovertemplate=(
+                        '<b>%{text}</b><br>Screening score: %{z:.1f}/100'
+                        '<br>Population within 250 miles: %{customdata[0]:,.0f}'
+                        '<br>Warehousing employment: %{customdata[1]:,.0f}'
+                        '<br>Average annual pay: $%{customdata[2]:,.0f}'
+                        '<br>Electricity benchmark: %{customdata[3]:.2f} cents/kWh<extra></extra>')))
+            elif map_view == 'FEMA risk context':
+                if fema_metadata['status'] == 'ok':
+                    hazard_map = view[['fips', 'county', 'state']].merge(
+                        fema_context[['fips', 'RISK_SCORE', 'RISK_RATNG']],
+                        on='fips', how='left', validate='one_to_one')
+                    hazard_map = hazard_map[hazard_map.RISK_SCORE.notna()]
+                    fig.add_trace(go.Choroplethmap(
+                        geojson=geometry, locations=hazard_map.fips, z=hazard_map.RISK_SCORE,
+                        text=hazard_map.county + ', ' + hazard_map.state,
+                        customdata=hazard_map[['RISK_RATNG']].fillna('Unavailable').to_numpy(),
+                        colorscale='YlOrRd', zmin=0, zmax=100,
+                        marker_line_width=0.5, marker_line_color='#ffffff',
+                        colorbar_title='FEMA risk',
+                        hovertemplate=('<b>%{text}</b><br>FEMA risk score: %{z:.1f}/100'
+                                       '<br>FEMA rating: %{customdata[0]}<extra></extra>')))
+                    st.caption('FEMA community risk context · Higher means higher relative risk. Gray = unavailable or outside selected scope. Warehouse rankings remain unchanged.')
+                else:
+                    st.info('FEMA risk context unavailable. Warehouse screening remains available.')
+            if highlighted is not None:
+                fig.add_trace(go.Scattermap(lon=[highlighted['lon']], lat=[highlighted['lat']],
+                                           mode='markers', marker={'size': 14, 'color': '#243746', 'opacity': 0.75},
+                                           name='Highlighted county', showlegend=False,
+                                           text=[f"{highlighted['county']}, {highlighted['state']}"],
+                                           hovertemplate='<b>%{text}</b><extra>Highlighted county</extra>'))
+            fig.update_layout(
+                map={'style': 'white-bg', 'center': {'lon': -98 if national else -77.8, 'lat': 39 if national else 40.2},
+                     'zoom': 2.6 if national else 4.3},
+                height=540, margin={'l': 0, 'r': 0, 't': 0, 'b': 0}, clickmode='event+select')
+            st.plotly_chart(fig, width='stretch', key='county_map',
+                            alt=('County screening scores with unranked counties in gray'
+                                 if map_view == 'Warehouse screening score'
+                                 else 'FEMA long-term county risk context with missing counties in gray'))
+            if map_view == 'Warehouse screening score':
+                st.caption('Census 2024 boundaries · Gray = unranked, unavailable, or outside selected scope. No commercial map token required.')
             else:
-                st.info('FEMA risk context unavailable. Warehouse screening remains available.')
-        if highlighted is not None:
-            fig.add_trace(go.Scattermap(lon=[highlighted['lon']], lat=[highlighted['lat']],
-                                       mode='markers', marker={'size': 14, 'color': '#243746', 'opacity': 0.75},
-                                       name='Highlighted county', showlegend=False,
-                                       text=[f"{highlighted['county']}, {highlighted['state']}"],
-                                       hovertemplate='<b>%{text}</b><extra>Highlighted county</extra>'))
-        fig.update_layout(
-            map={'style': 'white-bg', 'center': {'lon': -98 if national else -77.8, 'lat': 39 if national else 40.2},
-                 'zoom': 2.6 if national else 4.3},
-            height=540, margin={'l': 0, 'r': 0, 't': 0, 'b': 0}, clickmode='event+select')
-        st.plotly_chart(fig, width='stretch', key='county_map',
-                        alt=('County screening scores with unranked counties in gray'
-                             if map_view == 'Warehouse screening score'
-                             else 'FEMA long-term county risk context with missing counties in gray'))
-        if map_view == 'Warehouse screening score':
-            st.caption('Census 2024 boundaries · Gray = unranked, unavailable, or outside selected scope. No commercial map token required.')
-        else:
-            st.caption('FEMA county context uses the existing Census 2024 map boundaries; this is not a property-level hazard map.')
-with summary_column:
-    with st.container(border=True):
-        st.subheader('Current top five')
-        st.caption('Highest screening scores in your selected states.')
-        if ranked.empty:
-            st.caption('No complete counties are available in this selection.')
-        else:
-            for position, (_, row) in enumerate(ranked.head(5).iterrows(), 1):
-                st.markdown(f"**{position}. {row['county']}, {row['state']}**  \nScreening score · **{row['score']:.1f} / 100**")
-        st.markdown('**Current priorities**')
-        st.write(preset)
-        for label, weight in zip(LABELS, normalized_weights):
-            st.caption(f'{label} · **{weight:.2f}%**')
-        st.caption('A shortlist for further investigation. Higher scores reflect the selected priorities.')
+                st.caption('FEMA county context uses the existing Census 2024 map boundaries; this is not a property-level hazard map.')
+    with summary_column:
+        with st.container(key='top_five'):
+            st.subheader('Current top five')
+            st.caption('Highest screening scores in your selected states.')
+            if ranked.empty:
+                st.caption('No complete counties are available in this selection.')
+            else:
+                for position, (_, row) in enumerate(ranked.head(5).iterrows(), 1):
+                    st.markdown(f"**{position}. {row['county']}, {row['state']}**  \nScreening score · **{row['score']:.1f} / 100**")
+            st.markdown('**Current priorities**')
+            st.write(preset)
+            for label, weight in zip(LABELS, normalized_weights):
+                st.caption(f'{label} · **{weight:.2f}%**')
+            st.caption('A shortlist for further investigation. Higher scores reflect the selected priorities.')
 
 st.subheader('County comparison')
 st.caption('Search any county in the selected states, including counties with incomplete labor data.')
@@ -318,7 +330,7 @@ chosen = st.multiselect('Choose up to three counties', list(labels),
                         format_func=lambda x: labels[x], max_selections=3, key='chosen_counties', persist_state='session', on_change=mark_manual_comparison)
 if chosen:
     selected = all_scored.set_index('fips').loc[chosen].reset_index()
-    with st.container(border=True):
+    with st.container(key='comparison_panel'):
         comparison = selected[['county', 'state', 'score', 'reach_250mi', 'employment',
                                'annual_pay', 'electricity_cents_kwh', 'labor_status']].copy()
         comparison['county'] = comparison['county'] + ', ' + comparison['state']
@@ -336,7 +348,7 @@ if chosen:
                      column_config={'Score': st.column_config.NumberColumn(format='%.1f')})
         st.caption('Unavailable figures stay missing. Annual industry pay is not an hourly offer; electricity is a state average.')
 
-    with st.expander('Illustrative annual electricity expense', expanded=True):
+    with st.expander('Illustrative annual electricity expense', expanded=True, key='electricity_panel'):
         annual_kwh = st.number_input('Annual electricity consumption (kWh)', min_value=0.0,
                                     value=None, step=1000.0, key='annual_kwh', persist_state='session')
         st.caption('Annual kWh × cents/kWh ÷ 100. Uses the 2024 state commercial average, not an actual property tariff or site quote. This expense does not change screening scores.')
@@ -355,10 +367,10 @@ if chosen:
             st.dataframe(expenses, hide_index=True, width='stretch',
                          column_config={'2024 state commercial average (cents/kWh)': st.column_config.NumberColumn(format='%.2f'),
                                         'Annual consumption (kWh)': st.column_config.NumberColumn(format='localized')})
-    with st.expander('County evidence summaries'):
+    with st.expander('County evidence summaries', key='evidence_panel'):
         for _, row in selected.iterrows():
             st.write(evidence_brief(row))
-    with st.expander('Long-term hazard context', expanded=True):
+    with st.expander('Long-term hazard context', expanded=True, key='fema_panel'):
         st.caption('Long-term hazard and resilience context. NWS = current / near-term operational weather. FEMA NRI = historical/modelled long-term hazard context. Neither alters the warehouse screening score.')
         st.caption('FEMA community risk is not the probability that a specific warehouse will be damaged. County flood scores are not a property-level flood assessment; investigate site flood maps and engineering separately.')
         if fema_metadata['status'] != 'ok':
@@ -378,7 +390,7 @@ if chosen:
             st.caption(f"FIPS coverage: {fema_metadata['matched']} matched; {fema_metadata['unmatched']} unmatched; {len(fema_metadata['duplicate_fips'])} duplicate FIPS. Missing values remain unavailable; FEMA applicability ratings are preserved.")
             st.caption('Expected annual loss is a county aggregate including buildings, agriculture, and monetized population losses; it is not a warehouse loss estimate. Scores are relative indices, not damage probabilities.')
             st.markdown('[FEMA National Risk Index county source](' + fema_metadata['source_url'] + ')')
-    with st.expander('Operational context · NWS alerts', expanded=True):
+    with st.expander('Operational context · NWS alerts', expanded=True, key='weather_panel'):
         if st.session_state.get('weather_county') not in chosen:
             st.session_state['weather_county'] = None
         current = st.selectbox('Weather at county representative point', chosen,
@@ -400,7 +412,7 @@ if chosen:
                 else:
                     st.warning('Weather unavailable. This does not mean there are no alerts.')
                 st.markdown('[NWS source query](' + result['url'] + ')')
-            with st.container(border=True):
+            with st.container(key='forecast_panel'):
                 st.markdown(f"**Point forecast · {labels[current]}**")
                 st.caption('A point forecast is not county-wide or route-wide weather coverage. Weather is separate from the warehouse screening score.')
                 if st.button('Check NWS forecast'):
@@ -434,31 +446,32 @@ if st.session_state['view_mode'] == 'dashboard':
     factor = st.selectbox('Business priority to test', LABELS, key='sensitivity_factor', persist_state='session')
 scenarios = weight_sensitivity(data, weights, LABELS.index(factor), states, current_scored=all_scored)
 if st.session_state['view_mode'] == 'dashboard':
-    winners = [s['top_five'].iloc[0] for s in scenarios if not s['top_five'].empty]
-    if not winners:
-        st.info('No complete counties are available in the selected states for sensitivity analysis.')
-    elif len({row.fips for row in winners}) == 1:
-        st.caption(f"**{winners[0]['county']}, {winners[0]['state']} remains first in all three scenarios.**")
-    else:
-        st.caption('**The first-ranked county changes across these scenarios.**')
-    for tab, scenario in zip(st.tabs(['Current', '−10 pp', '+10 pp']), scenarios):
-        with tab:
-            st.markdown('**' + scenario['name'] + '**')
-            st.caption(' · '.join(f'{label}: {weight:.2f}%' for label, weight in zip(LABELS, scenario['display_weights'])))
-            top = scenario['top_five'][['rank', 'county', 'state', 'score']].copy()
-            top['county'] = top['county'] + ', ' + top['state']
-            top = top.drop(columns='state').rename(columns={'rank': 'Rank', 'county': 'County / state', 'score': 'Score'})
-            st.dataframe(top, hide_index=True, width='stretch',
-                         column_config={'Score': st.column_config.NumberColumn(format='%.1f')})
-            st.markdown('**Top-three membership vs current weights**')
-            for _, row in scenario['top_three_changes'].iterrows():
-                with st.container(horizontal=True):
-                    status_color = {'Remains top three': 'gray', 'Drops out of top three': 'orange', 'Enters top three': 'green'}[row['change']]
-                    st.badge(row['change'], color=status_color)
-                    st.write(f"{row['county']}, {row['state']} · rank {row['rank']}")
-    with st.expander('How to read sensitivity results'):
-        st.write('The selected factor moves by up to 10 percentage points, capped at 0–100%. Other factors retain their relative proportions. If all other weights are zero, released weight is split equally among them.')
-        st.write('Weights are displayed to two decimals with rounding remainders allocated so each mix totals 100%. Scores use unrounded weights. Rankings use the complete five-state universe before filtering to your selected states.')
+    with st.container(key='sensitivity_panel'):
+        winners = [s['top_five'].iloc[0] for s in scenarios if not s['top_five'].empty]
+        if not winners:
+            st.info('No complete counties are available in the selected states for sensitivity analysis.')
+        elif len({row.fips for row in winners}) == 1:
+            st.caption(f"**{winners[0]['county']}, {winners[0]['state']} remains first in all three scenarios.**")
+        else:
+            st.caption('**The first-ranked county changes across these scenarios.**')
+        for tab, scenario in zip(st.tabs(['Current', '−10 pp', '+10 pp']), scenarios):
+            with tab:
+                st.markdown('**' + scenario['name'] + '**')
+                st.caption(' · '.join(f'{label}: {weight:.2f}%' for label, weight in zip(LABELS, scenario['display_weights'])))
+                top = scenario['top_five'][['rank', 'county', 'state', 'score']].copy()
+                top['county'] = top['county'] + ', ' + top['state']
+                top = top.drop(columns='state').rename(columns={'rank': 'Rank', 'county': 'County / state', 'score': 'Score'})
+                st.dataframe(top, hide_index=True, width='stretch',
+                             column_config={'Score': st.column_config.NumberColumn(format='%.1f')})
+                st.markdown('**Top-three membership vs current weights**')
+                for _, row in scenario['top_three_changes'].iterrows():
+                    with st.container(horizontal=True):
+                        status_color = {'Remains top three': 'gray', 'Drops out of top three': 'orange', 'Enters top three': 'green'}[row['change']]
+                        st.badge(row['change'], color=status_color)
+                        st.write(f"{row['county']}, {row['state']} · rank {row['rank']}")
+        with st.expander('How to read sensitivity results'):
+            st.write('The selected factor moves by up to 10 percentage points, capped at 0–100%. Other factors retain their relative proportions. If all other weights are zero, released weight is split equally among them.')
+            st.write('Weights are displayed to two decimals with rounding remainders allocated so each mix totals 100%. Scores use unrounded weights. Rankings use the complete five-state universe before filtering to your selected states.')
 
 # Fill the reserved top-of-page answer only after all current evidence is available.
 question_selected = all_scored.set_index('fips').loc[chosen].reset_index()
@@ -537,7 +550,7 @@ saved_answer = st.session_state.get('question_answer')
 if st.session_state['view_mode'] == 'ask':
     with answer_slot:
         if saved_answer:
-            with st.container(border=True, key='latest_answer'):
+            with st.container(key='latest_answer'):
                 st.subheader('Latest answer')
                 with st.expander(saved_answer['question'], expanded=True, key=f"latest_response_{saved_answer.get('order', 0)}"):
                     render_turn(saved_answer)
@@ -554,7 +567,7 @@ if st.session_state['view_mode'] == 'ask':
                 render_turn(turn)
 
 if st.session_state['view_mode'] == 'dashboard':
-    with st.expander('Overall summary', expanded=False):
+    with st.expander('Overall summary', expanded=False, key='overall_summary_panel'):
         evidence = evidence_for_question('')
         fingerprint = evidence_fingerprint(evidence)
         if st.button('Generate overall summary', key='overall_summary'):
@@ -582,7 +595,7 @@ if st.session_state['view_mode'] == 'dashboard':
                 else:
                     st.info(interpretation['message'])
 
-with st.expander('Data coverage & methodology'):
+with st.expander('Data coverage & methodology', key='methodology_panel'):
     st.subheader('Data coverage')
     st.caption(f'{len(ranked)} of {len(view)} counties in the current selection have complete scoring data; {len(view) - len(ranked)} remain unranked.')
     st.caption('2024 private-sector warehousing/storage (NAICS 493) labor records, counted by labor_status.')

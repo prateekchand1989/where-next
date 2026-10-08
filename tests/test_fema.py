@@ -1,5 +1,6 @@
 """Offline FEMA tests; sample rows are from the official December 2025 layer."""
 import json
+from answer_fixtures import card_values
 from pathlib import Path
 
 import pandas as pd
@@ -102,10 +103,10 @@ def test_app_usable_without_fema(monkeypatch, tmp_path):
     assert not app.exception
     assert any('FEMA hazard data unavailable' in element.value for element in app.info)
     assert any(frame.value.columns.tolist()[0] == 'County' for frame in app.dataframe)
-    baseline_metrics = [metric.value for metric in app.metric]
+    baseline_metrics = card_values(app)
     next(widget for widget in app.selectbox if widget.label == 'Map view').select('FEMA risk context').run()
     assert not app.exception
-    assert [metric.value for metric in app.metric] == baseline_metrics
+    assert card_values(app) == baseline_metrics
     assert any('FEMA risk context unavailable' in element.value for element in app.info)
     next(widget for widget in app.selectbox if widget.label == 'Map view').select('Warehouse screening score').run()
     assert not app.exception
@@ -131,8 +132,8 @@ def test_app_fema_context_and_map_with_fixture(monkeypatch, source, tmp_path):
     panel = next(frame.value for frame in app.dataframe if 'Overall FEMA risk score' in frame.value.columns)
     assert panel.iloc[0]['County'] == 'Lackawanna County, PA'
     assert panel.iloc[0]['Overall FEMA risk score'] != 'Unavailable'
-    baseline_metrics = [metric.value for metric in app.metric]
+    baseline_metrics = card_values(app)
     next(widget for widget in app.selectbox if widget.label == 'Map view').select('FEMA risk context').run()
     assert not app.exception
-    assert [metric.value for metric in app.metric] == baseline_metrics
+    assert card_values(app) == baseline_metrics
     st.cache_data.clear()

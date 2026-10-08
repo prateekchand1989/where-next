@@ -3,6 +3,7 @@ import math
 import re
 
 from core import LABELS, PRESETS
+from question_targeting import explicit_screening_states
 
 STATES = ['MD', 'NJ', 'NY', 'OH', 'PA']
 INTENT_INSTRUCTIONS = """Translate the question into existing analytical controls only.
@@ -20,6 +21,10 @@ mix (e.g. more labor-cost emphasis increases Lower labor benchmark and rebalance
 the other priorities proportionally). A scenario request uses the existing preset;
 leave weights null unless the user additionally requests custom weights.
 Question-only examples: Why does the leader rank first? What risks should I investigate?
+Ordinal requests never supply a county: Python resolves next-best/#2/number three
+after controls change. An explicit state constraint applies even in a question such
+as What is the next best county in Pennsylvania? Return candidate_states PA, with
+selected_counties null; Python handles scope-dependent comparison defaults.
 Update examples: Only compare Pennsylvania and New Jersey; Switch to temperature-controlled;
 Compare Lackawanna, Lehigh and Northampton; Make reach twice as important as electricity.
 Do not silently substitute supported states for unsupported states.
@@ -94,28 +99,30 @@ def validated_changes(intent, controls, data):
                     or len(set(counties)) != len(counties)):
                 return {}
             patch['selected_counties'] = counties
-        elif 'candidate_states' in patch:
-            # Preserve valid comparison choices; prune counties excluded by the new scope.
-            patch['selected_counties'] = [fips for fips in controls['selected_counties'] if fips in allowed]
         return {key: value for key, value in patch.items() if value != controls[key]}
     except (KeyError, TypeError, ValueError, OverflowError):
         return {}
 
 
 def parse_changes(provider, question, controls, data):
+    explicit_states = explicit_screening_states(question)
+    scope_patch = ({'candidate_states': explicit_states}
+                   if explicit_states and explicit_states != controls['candidate_states'] else {})
     if provider is None:
-        return {}
+        return scope_patch
     try:
         catalog = data[['fips', 'county', 'state']].to_dict('records')
         intent = provider.parse_intent(question, controls, catalog)
+        if explicit_states and isinstance(intent, dict):
+            intent = {**intent, 'intent': 'update_analysis', 'candidate_states': explicit_states}
         if (isinstance(intent, dict) and intent.get('selected_counties') is not None
                 and not re.search(r'\b(compare|comparison|select|choose)\b', question, re.I)):
             # Naming a county as the answer's subject is not permission to replace
             # the user's manually chosen comparison counties.
             intent = {**intent, 'selected_counties': None}
-        return validated_changes(intent, controls, data)
+        return {**validated_changes(intent, controls, data), **scope_patch}
     except Exception:
-        return {}
+        return scope_patch
 
 
 def change_lines(changes):

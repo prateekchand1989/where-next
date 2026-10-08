@@ -1,4 +1,5 @@
 """Mocked AI tests: no keys or live model requests needed."""
+from answer_fixtures import card_values
 import io
 import json
 from datetime import datetime, timedelta, timezone
@@ -187,12 +188,12 @@ def test_app_button_only_labeled_output_and_invalidated_evidence(monkeypatch):
     calls = mocked_model(monkeypatch)
     app = make_app()
     assert not app.exception and not calls
-    baseline_metrics = [metric.value for metric in app.metric]
+    baseline_metrics = card_values(app)
     app.button(key='overall_summary').click().run()
     assert not app.exception and len(calls) == 1
     assert any(markdown.value == '**AI-generated interpretation**' for markdown in app.markdown)
     assert [text.value for text in app.markdown if text.value in MOCK_SECTIONS.values()] == list(MOCK_SECTIONS.values())
-    assert [metric.value for metric in app.metric] == baseline_metrics
+    assert card_values(app) == baseline_metrics
     assert any(expander.label == 'County evidence summaries' for expander in app.expander)
     app.selectbox(key='map_view').select('FEMA risk context').run()
     assert not app.exception and len(calls) == 1

@@ -7,6 +7,9 @@ from interpretation import ANSWER_STYLE
 from question_state import (DEFAULT_SCENARIO, WEIGHT_KEYS, initialize_question_state,
                             reset_for_new_question)
 from test_analysis_workflow import ANSWER, first, intent, make_app, workflow
+from answer_fixtures import expected_answer
+
+ANSWER = expected_answer(ANSWER)
 
 
 def evidence(calls):

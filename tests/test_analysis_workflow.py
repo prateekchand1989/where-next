@@ -8,6 +8,7 @@ from streamlit.testing.v1 import AppTest
 
 from analysis_intent import validated_changes, normalize_weights, tile_summary
 from core import LABELS, PRESETS, load_data, score_counties
+from answer_fixtures import structured_answer, expected_answer, card_html
 
 
 ANSWER = "**What the model now shows**\n- **Current leader** ? early-stage county screening.\n\n**Watch-outs**\n- Rents and freight rates are unavailable."
@@ -27,7 +28,7 @@ def workflow(monkeypatch, parsed=None, parser_failure=False, answer_failure=Fals
         parsing = body['text']['format']['name'] == 'analysis_intent'
         if (parsing and parser_failure) or (not parsing and answer_failure):
             raise TimeoutError('private-secret')
-        value = (parsed if parsed is not None else intent()) if parsing else {'answer': ANSWER}
+        value = (parsed if parsed is not None else intent()) if parsing else structured_answer(ANSWER)
         return io.BytesIO(json.dumps({'status': 'completed', 'output': [
             {'type': 'message', 'content': [{'type': 'output_text', 'text': json.dumps(value)}]}]}).encode())
     monkeypatch.setattr('urllib.request.urlopen', respond)
@@ -113,7 +114,7 @@ def test_updated_evidence_precedes_answer_and_dashboard(monkeypatch, question, p
     ranked = scored[scored.complete & scored.state.isin(supplied['candidate_states'])]
     assert supplied['current_leader']['fips'] == ranked.iloc[0].fips
     assert supplied['current_leader']['score'] == ranked.iloc[0].score
-    assert app.metric[2].value == f"{ranked.iloc[0].score:.1f} / 100"
+    assert f"Screening score: {ranked.iloc[0].score:.1f} / 100" in card_html(app)
     assert any(caption.value == 'Analysis updated' for caption in app.caption)
     turn = app.session_state['question_history'][0]
     assert turn['analysis_changed'] and turn['applied_changes'] and len(turn['summary']) < 120
@@ -121,7 +122,7 @@ def test_updated_evidence_precedes_answer_and_dashboard(monkeypatch, question, p
     assert not app.exception and len(calls) == 2
     assert app.session_state['view_mode'] == 'dashboard'
     assert not any(header.value == 'Latest answer' for header in app.subheader)
-    assert app.metric[2].value == f"{ranked.iloc[0].score:.1f} / 100"
+    assert f"Screening score: {ranked.iloc[0].score:.1f} / 100" in card_html(app)
     app.run()
     assert len(calls) == 2
 
@@ -134,7 +135,7 @@ def test_enter_tiles_history_and_view_switching(monkeypatch):
     latest = next(tile for tile in app.expander if tile.key == 'latest_response_1')
     assert latest.proto.expanded
     assert any(block.key == 'latest_answer' for block in app.get('flex_container'))
-    assert any(markdown.value == ANSWER for markdown in app.markdown)
+    assert any(markdown.value == expected_answer(ANSWER) for markdown in app.markdown)
     assert not any(caption.value == 'Analysis updated' for caption in app.caption)
     app.chat_input(key='followup_question').set_value('What risks should I investigate?').run()
     assert not app.exception and len(calls) == 4
@@ -145,7 +146,7 @@ def test_enter_tiles_history_and_view_switching(monkeypatch):
     assert latest.proto.expanded
     # AppTest cannot click native expander toggles; verify content is available
     # inside the collapsed tile. Browser validation covers opening/closing it.
-    assert any(markdown.value == ANSWER for markdown in older.markdown)
+    assert any(markdown.value == expected_answer(ANSWER) for markdown in older.markdown)
     app.run()
     assert len(calls) == 4 and len(app.session_state['question_history']) == 2
     for turn in app.session_state['question_history']:
@@ -176,7 +177,7 @@ def test_failures_keep_dashboard_safe(monkeypatch, failure):
     calls = workflow(monkeypatch, intent(candidate_states=['CA']) if failure == 'invalid' else intent(candidate_states=['PA']),
                      parser_failure=failure == 'parser', answer_failure=failure == 'answer')
     app = first(make_app(), 'Only compare Pennsylvania.')
-    assert not app.exception and len(calls) == 2 and app.metric
+    assert not app.exception and len(calls) == 2 and card_html(app)
     assert app.multiselect(key='candidate_states').value == (['PA'] if failure == 'answer' else ['MD', 'NJ', 'NY', 'OH', 'PA'])
     assert not any('private-secret' in info.value for info in app.info)
     app.run()

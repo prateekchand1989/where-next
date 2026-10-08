@@ -5,9 +5,36 @@ STATE_NAMES = {'MD': 'Maryland', 'NJ': 'New Jersey', 'NY': 'New York',
                'OH': 'Ohio', 'PA': 'Pennsylvania'}
 
 
-def question_targets(question, scored, ranked, selected, states):
+def requested_rank(question):
+    text = question.casefold()
+    if re.search(r'\bnext[ -]best\b', text):
+        return 2
+    for rank, word in enumerate(('first', 'second', 'third', 'fourth', 'fifth'), 1):
+        number = ('one', 'two', 'three', 'four', 'five')[rank - 1]
+        ordinal_word = word + (r'(?:[ -]best|\s+county)' if rank == 1 else r'(?:[ -]best)?')
+        if re.search(r'\b' + ordinal_word + r'\b|\bnumber\s+(?:' + number + '|' + str(rank) + r')\b|#\s*' + str(rank) + r'\b', text):
+            return rank
+    return None
+
+
+def explicit_screening_states(question):
+    """Only screening/scope requests override controls, not named-county risk context."""
+    if requested_rank(question) is None and not re.search(
+            r'\b(best\s+(?:county|location)|where|warehouse|only|candidate states)\b', question, re.I):
+        return None
+    aliases = {alias.casefold(): code for code, name in STATE_NAMES.items() for alias in (code, name)}
+    token = '(?:' + '|'.join(re.escape(alias) for alias in sorted(aliases, key=len, reverse=True)) + r')\b(?!\s+County)'
+    found = []
+    for match in re.finditer(r'\b(?:in|within|across|from)\s+(' + token + r'(?:\s*(?:,|and|or|&|\+)\s*' + token + ')*)', question, re.I):
+        found.extend(aliases[item.group().casefold()] for item in re.finditer(token, match.group(1), re.I))
+    return sorted(set(found)) or None
+
+
+def question_targets(question, scored, ranked, selected, states, highlighted_fips=None):
     """Names take precedence; otherwise shortlist, comparison, then current leader."""
     text = question.casefold()
+    ordinal = requested_rank(question)
+    explicit_scope = explicit_screening_states(question)
     matches = []
     ambiguous = []
     mentions = []
@@ -16,6 +43,11 @@ def question_targets(question, scored, ranked, selected, states):
         pattern = r'(?<!\w)' + re.escape(short.casefold()) + r'(?:\s+county)?(?!\w)'
         mentions.extend((mention, name, group) for mention in re.finditer(pattern, text))
     for mention, name, group in mentions:
+        # "in New York" is a state constraint; "New York County" remains explicit.
+        if (explicit_scope is not None and not re.search(r'\bcounty$', mention.group(), re.I)
+                and mention.group().casefold() in {name.casefold() for name in STATE_NAMES.values()}
+                and re.search(r'\b(?:in|within|across|from)\s*$', text[:mention.start()])):
+            continue
         # "York" inside "New York County" must not resolve to a second county.
         if any(other.start() <= mention.start() and other.end() >= mention.end()
                and other.end() - other.start() > mention.end() - mention.start()
@@ -36,6 +68,13 @@ def question_targets(question, scored, ranked, selected, states):
     if matches or ambiguous:
         fips = list(dict.fromkeys(fips for _, fips in sorted(matches)))
         return {'kind': 'explicit_counties', 'fips': fips, 'unresolved_names': ambiguous}
+    if ordinal is not None:
+        targets = list(ranked.iloc[ordinal - 1:ordinal].fips)
+        if re.search(r'\b(compare|compared|comparison|trade[- ]?offs)\b', text):
+            subjects = [highlighted_fips] if highlighted_fips in set(scored.fips) else list(selected.head(1).fips)
+            return {'kind': 'highlighted_comparison', 'fips': list(dict.fromkeys(subjects + targets)),
+                    'requested_rank': ordinal, 'unresolved_names': []}
+        return {'kind': 'ranked_county', 'fips': targets, 'requested_rank': ordinal, 'unresolved_names': []}
     unknown = re.findall(r'\b([a-z-]+)\s+county\b', text)
     if any(name not in {'current', 'recommended', 'best', 'top', 'selected', 'the', 'a', 'each', 'any'}
            for name in unknown):

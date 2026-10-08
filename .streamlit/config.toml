@@ -1,15 +1,15 @@
 [theme]
 base = "light"
-primaryColor = "#176B68"
-backgroundColor = "#FFFFFF"
-secondaryBackgroundColor = "#F3F6F7"
-textColor = "#243442"
-borderColor = "#DCE4E8"
+primaryColor = "#147D69"
+backgroundColor = "#F1F8F4"
+secondaryBackgroundColor = "#DCECE5"
+textColor = "#20352F"
+borderColor = "#CBDDD4"
 font = "sans-serif"
-baseRadius = "0.5rem"
+baseRadius = "0.75rem"
 showWidgetBorder = true
-dataframeHeaderBackgroundColor = "#EDF2F4"
+dataframeHeaderBackgroundColor = "#E5F0E9"
 
 [theme.sidebar]
-backgroundColor = "#F3F6F7"
-secondaryBackgroundColor = "#FFFFFF"
+backgroundColor = "#E8F2EC"
+secondaryBackgroundColor = "#F8FCF9"

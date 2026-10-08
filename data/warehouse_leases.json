@@ -1,0 +1,260 @@
+{
+  "schema_version": 1,
+  "sources": {
+    "pa": {
+      "source_organization": "Cushman & Wakefield",
+      "original_url": "https://assets.cushmanwakefield.com/-/media/cw/marketbeat-pdfs/2025/q2/us-reports/industrial/pa-i-81-i-78_americas_marketbeat_industrial_q22025.pdf?rev=f94be636d0924e21aacf457964a42285",
+      "publication_period": "Q2 2025",
+      "retrieval_date": "2026-10-07",
+      "rent_basis": "Net asking; NNN detail not specified",
+      "observation_kind": "observed benchmark",
+      "observation_confidence": "medium"
+    },
+    "nj": {
+      "source_organization": "Cushman & Wakefield",
+      "original_url": "https://assets.cushmanwakefield.com/-/media/cw/marketbeat-pdfs/2025/q2/us-reports/industrial/new-jersey_americas_marketbeat_industrial_q22025_v2.pdf?rev=2379c1af903e436ab4f36a1f317e10f7",
+      "publication_period": "Q2 2025",
+      "retrieval_date": "2026-10-07",
+      "rent_basis": "Net asking; NNN detail not specified",
+      "observation_kind": "observed benchmark",
+      "observation_confidence": "medium"
+    },
+    "ny": {
+      "source_organization": "Cushman & Wakefield / Pyramid Brokerage",
+      "original_url": "https://assets.cushmanwakefield.com/-/media/cw/marketbeat-pdfs/2025/q2/us-reports/industrial/buffalo_americas_alliance_marketbeat_industrial_q22025.pdf?rev=2414e48a609a4178835cbb8f4316e8c1",
+      "publication_period": "Q2 2025",
+      "retrieval_date": "2026-10-07",
+      "rent_basis": "Net asking; NNN detail not specified",
+      "observation_kind": "observed benchmark",
+      "observation_confidence": "medium"
+    },
+    "md": {
+      "source_organization": "Cushman & Wakefield",
+      "original_url": "https://assets.cushmanwakefield.com/-/media/cw/marketbeat-pdfs/2025/q2/us-reports/industrial/baltimore_americas_industrial_marketbeat_q22025.pdf?rev=4947657687bb4be89f8865f2dd9ddac6",
+      "publication_period": "Q2 2025",
+      "retrieval_date": "2026-10-07",
+      "rent_basis": "Net asking; NNN detail not specified",
+      "observation_kind": "observed benchmark",
+      "observation_confidence": "medium"
+    },
+    "oh": {
+      "source_organization": "Cushman & Wakefield / CRESCO Real Estate",
+      "original_url": "https://assets.cushmanwakefield.com/-/pmedia/240522/0/3455-w-140th-street.pdf?rev=6eb63833ab2eb96fa3ff507b6ab9fc647be7806fea9ed6bee495c2809e8366dc472b8ca08fdcd34c6fc94c8879a0417b7c824eba447a3b01f71b7526ed6a0738",
+      "publication_period": "Q2 2025",
+      "retrieval_date": "2026-10-07",
+      "rent_basis": "Net asking; NNN detail not specified",
+      "observation_kind": "observed benchmark",
+      "observation_confidence": "medium"
+    }
+  },
+  "observations": [
+    {
+      "id": "pa-0",
+      "source_id": "pa",
+      "market": "Northeastern PA",
+      "warehouse_type": "General merchandise",
+      "asking_rent_psf_year": 7.61,
+      "county_fips": [
+        "42069",
+        "42079"
+      ],
+      "geographic_coverage": "Lackawanna and Luzerne counties only; regional warehouse/distribution proxy, not county observations.",
+      "mapping_confidence": "medium",
+      "mapping_rule": "Lackawanna and Luzerne counties only; regional warehouse/distribution proxy, not county observations.",
+      "source_page": 2
+    },
+    {
+      "id": "pa-1",
+      "source_id": "pa",
+      "market": "Lehigh Valley",
+      "warehouse_type": "General merchandise",
+      "asking_rent_psf_year": 11.67,
+      "county_fips": [
+        "42077",
+        "42095"
+      ],
+      "geographic_coverage": "Lehigh and Northampton counties; regional warehouse/distribution proxy, not county observations.",
+      "mapping_confidence": "medium",
+      "mapping_rule": "Lehigh and Northampton counties; regional warehouse/distribution proxy, not county observations.",
+      "source_page": 2
+    },
+    {
+      "id": "pa-2",
+      "source_id": "pa",
+      "market": "Central PA",
+      "warehouse_type": "General merchandise",
+      "asking_rent_psf_year": 8.73,
+      "county_fips": [
+        "42041",
+        "42043",
+        "42071",
+        "42133"
+      ],
+      "geographic_coverage": "Cumberland, Dauphin, Lancaster and York counties only; conservative corridor proxy.",
+      "mapping_confidence": "medium",
+      "mapping_rule": "Cumberland, Dauphin, Lancaster and York counties only; conservative corridor proxy.",
+      "source_page": 2
+    },
+    {
+      "id": "nj-3",
+      "source_id": "nj",
+      "market": "Northern NJ",
+      "warehouse_type": "General merchandise",
+      "asking_rent_psf_year": 18.37,
+      "county_fips": [
+        "34003",
+        "34013",
+        "34017",
+        "34027",
+        "34031",
+        "34039"
+      ],
+      "geographic_coverage": "Bergen, Essex, Hudson, Morris, Passaic and Union counties only; Northern NJ warehouse/distribution proxy.",
+      "mapping_confidence": "medium",
+      "mapping_rule": "Bergen, Essex, Hudson, Morris, Passaic and Union counties only; Northern NJ warehouse/distribution proxy.",
+      "source_page": 3
+    },
+    {
+      "id": "nj-4",
+      "source_id": "nj",
+      "market": "Central NJ",
+      "warehouse_type": "General merchandise",
+      "asking_rent_psf_year": 16.26,
+      "county_fips": [
+        "34021",
+        "34023",
+        "34025",
+        "34035"
+      ],
+      "geographic_coverage": "Mercer, Middlesex, Monmouth and Somerset counties only; Central NJ warehouse/distribution proxy.",
+      "mapping_confidence": "medium",
+      "mapping_rule": "Mercer, Middlesex, Monmouth and Somerset counties only; Central NJ warehouse/distribution proxy.",
+      "source_page": 3
+    },
+    {
+      "id": "ny-5",
+      "source_id": "ny",
+      "market": "Buffalo warehouse/distribution",
+      "warehouse_type": "General merchandise",
+      "asking_rent_psf_year": 7.25,
+      "county_fips": [
+        "36029"
+      ],
+      "geographic_coverage": "Erie County only; Buffalo city/suburban warehouse/distribution proxy, not a county rent observation.",
+      "mapping_confidence": "medium",
+      "mapping_rule": "Erie County only; Buffalo city/suburban warehouse/distribution proxy, not a county rent observation.",
+      "source_page": 2
+    },
+    {
+      "id": "md-6",
+      "source_id": "md",
+      "market": "Baltimore warehouse/distribution",
+      "warehouse_type": "General merchandise",
+      "asking_rent_psf_year": 10.92,
+      "county_fips": [
+        "24003",
+        "24005",
+        "24027",
+        "24510"
+      ],
+      "geographic_coverage": "Anne Arundel, Baltimore County, Howard and Baltimore City only; metro warehouse/distribution proxy.",
+      "mapping_confidence": "medium",
+      "mapping_rule": "Anne Arundel, Baltimore County, Howard and Baltimore City only; metro warehouse/distribution proxy.",
+      "source_page": 2
+    },
+    {
+      "id": "md-7",
+      "source_id": "md",
+      "market": "Harford and Cecil County",
+      "warehouse_type": "General merchandise",
+      "asking_rent_psf_year": 8.22,
+      "county_fips": [
+        "24015",
+        "24025"
+      ],
+      "geographic_coverage": "Shared two-county warehouse/distribution benchmark; each county uses the same pooled observation.",
+      "mapping_confidence": "medium",
+      "mapping_rule": "Shared two-county warehouse/distribution benchmark; each county uses the same pooled observation.",
+      "source_page": 2
+    },
+    {
+      "id": "oh-8",
+      "source_id": "oh",
+      "market": "Cleveland industrial",
+      "warehouse_type": "General merchandise",
+      "asking_rent_psf_year": 5.71,
+      "county_fips": [
+        "39035"
+      ],
+      "geographic_coverage": "Cuyahoga County only; Cleveland industrial proxy includes manufacturing and is less specific than dry warehouse data.",
+      "mapping_confidence": "low",
+      "mapping_rule": "Cuyahoga County only; Cleveland industrial proxy includes manufacturing and is less specific than dry warehouse data.",
+      "source_page": 18
+    },
+    {
+      "id": "oh-9",
+      "source_id": "oh",
+      "market": "Lake County industrial",
+      "warehouse_type": "General merchandise",
+      "asking_rent_psf_year": 5.31,
+      "county_fips": [
+        "39085"
+      ],
+      "geographic_coverage": "Lake County industrial submarket; mixed industrial property proxy for a dry warehouse.",
+      "mapping_confidence": "low",
+      "mapping_rule": "Lake County industrial submarket; mixed industrial property proxy for a dry warehouse.",
+      "source_page": 18
+    },
+    {
+      "id": "oh-10",
+      "source_id": "oh",
+      "market": "Medina County industrial",
+      "warehouse_type": "General merchandise",
+      "asking_rent_psf_year": 5.98,
+      "county_fips": [
+        "39103"
+      ],
+      "geographic_coverage": "Medina County industrial submarket; mixed industrial property proxy for a dry warehouse.",
+      "mapping_confidence": "low",
+      "mapping_rule": "Medina County industrial submarket; mixed industrial property proxy for a dry warehouse.",
+      "source_page": 18
+    },
+    {
+      "id": "oh-11",
+      "source_id": "oh",
+      "market": "Portage County industrial",
+      "warehouse_type": "General merchandise",
+      "asking_rent_psf_year": 4.9,
+      "county_fips": [
+        "39133"
+      ],
+      "geographic_coverage": "Portage County industrial submarket; mixed industrial property proxy for a dry warehouse.",
+      "mapping_confidence": "low",
+      "mapping_rule": "Portage County industrial submarket; mixed industrial property proxy for a dry warehouse.",
+      "source_page": 18
+    },
+    {
+      "id": "oh-12",
+      "source_id": "oh",
+      "market": "Stark County industrial",
+      "warehouse_type": "General merchandise",
+      "asking_rent_psf_year": 4.75,
+      "county_fips": [
+        "39151"
+      ],
+      "geographic_coverage": "Stark County industrial submarket; mixed industrial property proxy for a dry warehouse.",
+      "mapping_confidence": "low",
+      "mapping_rule": "Stark County industrial submarket; mixed industrial property proxy for a dry warehouse.",
+      "source_page": 18
+    }
+  ],
+  "temperature_controlled": {
+    "status": "unavailable",
+    "reason": "No verified, geographically applicable annual lease-rate observations in reviewed sources. No dry-warehouse markup applied.",
+    "reviewed_sources": [
+      "https://www.cbre.com/insights/reports/midwest-cold-storage-trends-2025",
+      "https://mktgdocs.cbre.com/2299/568b1c84-406d-45b8-9be4-d05bc3752ced-1860730073/CBRE_Midwest_Cold_Storage_Repo.pdf"
+    ],
+    "retrieval_date": "2026-10-07"
+  }
+}

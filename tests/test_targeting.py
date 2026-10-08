@@ -9,6 +9,7 @@ from core import LABELS, PRESETS, load_data, score_counties, weight_sensitivity
 from fema import load_fema_context
 from interpretation import build_evidence
 from analysis_intent import parse_changes
+from answer_fixtures import structured_answer
 
 
 @pytest.fixture
@@ -95,7 +96,7 @@ def mock_model(monkeypatch, updates=None):
         else:
             supplied = json.loads(body['input'][0]['content'])
             names = ', '.join(county['county'] for county in supplied['question_target_counties'])
-            result = {'answer': '**County context**\n- ' + names + '\n\n**Risk context**\n- Use supplied county FEMA context; property-level flood risk is unavailable.'}
+            result = structured_answer('**County context**\n- ' + names + '\n\n**Risk context**\n- Use supplied county FEMA context; property-level flood risk is unavailable.')
         return io.BytesIO(json.dumps({'status':'completed','output':[{'type':'message','content':[
             {'type':'output_text','text':json.dumps(result)}]}]}).encode())
     monkeypatch.setattr('urllib.request.urlopen', respond)

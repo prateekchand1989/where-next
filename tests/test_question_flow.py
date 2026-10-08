@@ -7,6 +7,7 @@ from streamlit.testing.v1 import AppTest
 
 from interpretation import INSTRUCTIONS, UNSUPPORTED_ANSWER, OpenAIProvider, generate_answer
 from core import PRESETS, load_data, score_counties
+from answer_fixtures import structured_answer, card_html
 
 
 def model(monkeypatch, answer='This is an early-stage county-level screening answer, not a full network optimization.'):
@@ -25,7 +26,7 @@ def model(monkeypatch, answer='This is an early-stage county-level screening ans
         calls.append(body)
         return io.BytesIO(json.dumps({'status': 'completed', 'output': [
             {'type': 'message', 'content': [{'type': 'output_text',
-             'text': json.dumps({'answer': answer})}]}]}).encode())
+             'text': json.dumps(structured_answer(answer))}]}]}).encode())
     monkeypatch.setattr('urllib.request.urlopen', respond)
     return calls
 
@@ -70,7 +71,7 @@ def test_landing_suggestion_empty_and_submission(monkeypatch):
     assert len(calls) == 1 and result.session_state['submitted_question'] == suggestion
     data, _ = load_data()
     baseline = score_counties(data, PRESETS['General merchandise'])
-    assert result.metric[2].value == f"{baseline.iloc[0]['score']:.1f} / 100"
+    assert f"Screening score: {baseline.iloc[0]['score']:.1f} / 100" in card_html(result)
 
 
 def test_followup_invalidation_and_new_question(monkeypatch):
@@ -142,7 +143,7 @@ def test_no_key_still_opens_workspace(monkeypatch):
     result = AppTest.from_file('../app.py', default_timeout=60)
     result.secrets['OPENAI_API_KEY'] = ''
     submit(result.run())
-    assert not result.exception and not calls and result.metric
+    assert not result.exception and not calls and card_html(result)
     assert any(text.value == 'AI interpretation is not configured.' for text in result.info)
 
 
@@ -150,9 +151,9 @@ def test_unsupported_answer_and_generous_ceiling(monkeypatch):
     calls = model(monkeypatch, UNSUPPORTED_ANSWER)
     result = generate_answer({'current_leader': 'Unavailable'}, OpenAIProvider('test'),
                              'What are warehouse rents and freight rates?')
-    assert result['answer'] == UNSUPPORTED_ANSWER
+    assert UNSUPPORTED_ANSWER in result['answer']
     assert 'rents' in calls[0]['instructions'] and 'Road travel times' in calls[0]['instructions']
     model(monkeypatch, 'word ' * 300)
-    assert generate_answer({}, OpenAIProvider('test'), 'Explain')['status'] == 'ok'
+    assert generate_answer({}, OpenAIProvider('test'), 'Explain')['status'] == 'unavailable'
     model(monkeypatch, 'word ' * 501)
     assert generate_answer({}, OpenAIProvider('test'), 'Explain')['status'] == 'unavailable'

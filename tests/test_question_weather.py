@@ -1,6 +1,7 @@
 """Explicit-question hazard/weather enrichment, freshness, targeting, and failures."""
 import io
 import json
+from answer_fixtures import structured_answer, card_values
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -97,11 +98,11 @@ def model(monkeypatch, changes=None):
             evidence = json.loads(body['input'][0]['content'])
             target = evidence['question_target_counties'][0]
             unavailable = any(target['nws'][kind]['status'] != 'ok' for kind in ('alerts','forecast'))
-            value = {'answer': '**Long-term hazard context · FEMA**\n- ' + target['county'] +
+            value = structured_answer('**Long-term hazard context · FEMA**\n- ' + target['county'] +
                      ': overall risk ' + str(target['fema']['RISK_SCORE']) +
                      '\n\n**Current operational weather · NWS**\n- ' +
                      ('Current operational weather is temporarily unavailable.' if unavailable else
-                      'No active alerts at the representative point; forecast is Clear.')}
+                      'No active alerts at the representative point; forecast is Clear.'))
         return io.BytesIO(json.dumps({'status':'completed','output':[{'type':'message','content':[
             {'type':'output_text','text':json.dumps(value)}]}]}).encode())
     monkeypatch.setattr('urllib.request.urlopen', respond)
@@ -126,7 +127,7 @@ def test_updated_target_fema_and_nws_before_answer(monkeypatch, mocked_weather, 
     calls = model(monkeypatch)
     app = workspace()
     assert not app.exception and not calls and not any(mocked_weather.values())
-    baseline = [metric.value for metric in app.metric]
+    baseline = card_values(app)
     app.chat_input(key='followup_question').set_value(question).run()
     assert not app.exception and len(calls) == 2
     supplied = json.loads(calls[-1]['input'][0]['content'])
@@ -144,7 +145,16 @@ def test_updated_target_fema_and_nws_before_answer(monkeypatch, mocked_weather, 
     for county in supplied['selected_counties']:
         if county['fips'] not in targets:
             assert county['nws']['forecast']['status'] == 'not_fetched_in_this_session'
-    assert [metric.value for metric in app.metric] == baseline
+    if supplied['question_context']['kind'] == 'explicit_counties':
+        # Named-county questions now deliberately move the headline highlight;
+        # weather enrichment still leaves deterministic scores/rankings unchanged.
+        row = points.loc[targets[0]]
+        assert app.session_state['highlighted_fips'] == targets[0]
+        assert card_values(app)[1:4] == [
+            f'{row.employment:,.0f}', f'${row.annual_pay:,.0f}',
+            f'{row.electricity_cents_kwh:.2f} ¢/kWh']
+    else:
+        assert card_values(app) == baseline
     app.run(); app.selectbox(key='map_view').select('FEMA risk context').run()
     assert len(calls) == 2 and mocked_weather == {'alerts': expected, 'forecast': expected}
     app.chat_input(key='followup_question').set_value(question).run()
