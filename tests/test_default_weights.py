@@ -16,6 +16,7 @@ def test_repeated_default_weights_reset_preserves_preferences_and_reactivity(mon
     app.multiselect(key='candidate_states').set_value(['PA', 'MD']).run()
     app.checkbox(key='national_map').set_value(True).run()
     app.number_input(key='annual_kwh').set_value(100000).run()
+    preview_calls = len(calls)
     for slider, value in [('priority_weight_3', 82), ('priority_weight_0', 100)]:
         app.slider(key=slider).set_value(value).run()
         assert app.slider(key=slider).value == value
@@ -23,12 +24,13 @@ def test_repeated_default_weights_reset_preserves_preferences_and_reactivity(mon
         assert [app.slider(key=f'priority_weight_{i}').value for i in range(4)] == PRESETS[preset]
         assert sum(app.slider(key=f'priority_weight_{i}').value for i in range(4)) == 100
         assert_current_panels(app)
-        assert app.multiselect(key='candidate_states').value == ['PA', 'MD']
+        assert app.multiselect(key='candidate_states').value == ['MD', 'PA']
         assert app.checkbox(key='national_map').value is True
         assert app.number_input(key='annual_kwh').value == 100000
         assert app.selectbox(key='scenario').value == preset
         app.button(key='default_weights').click().run()
         assert_current_panels(app)
+        assert len(calls) == preview_calls
     manual = ['42069', '24021', '42077']
     app.multiselect(key='chosen_counties').set_value(manual).run()
     app.slider(key='priority_weight_1').set_value(73).run()
@@ -38,4 +40,5 @@ def test_repeated_default_weights_reset_preserves_preferences_and_reactivity(mon
     ranked = score_counties(load_data()[0], PRESETS[preset])
     ranked = ranked[ranked.complete & ranked.state.isin(['PA', 'MD'])]
     assert card_values(app)[0] == f'{ranked.iloc[0].county}, {ranked.iloc[0].state}'
-    assert len(calls) == 2
+    assert len(calls) == preview_calls
+    assert sum(c['text']['format']['name'] == 'analysis_intent' for c in calls) == 1

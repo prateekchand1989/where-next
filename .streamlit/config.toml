@@ -1,15 +1,21 @@
 [theme]
-base = "light"
-primaryColor = "#147D69"
-backgroundColor = "#F1F8F4"
-secondaryBackgroundColor = "#DCECE5"
-textColor = "#20352F"
-borderColor = "#CBDDD4"
+base = "dark"
+primaryColor = "#24C77B"
+backgroundColor = "#080F0D"
+secondaryBackgroundColor = "#14231D"
+textColor = "#F3F7F5"
+borderColor = "#284137"
 font = "sans-serif"
 baseRadius = "0.75rem"
 showWidgetBorder = true
-dataframeHeaderBackgroundColor = "#E5F0E9"
+dataframeHeaderBackgroundColor = "#14231D"
+dataframeHeaderTextColor = "#F3F7F5"
 
 [theme.sidebar]
-backgroundColor = "#E8F2EC"
-secondaryBackgroundColor = "#F8FCF9"
+backgroundColor = "#061C15"
+secondaryBackgroundColor = "#101B17"
+
+# Reuse local credentials without copying them into this worktree.
+# A worktree-local file, if present, takes precedence over the shared file.
+[secrets]
+files = ["../where-next/.streamlit/secrets.toml", ".streamlit/secrets.toml"]

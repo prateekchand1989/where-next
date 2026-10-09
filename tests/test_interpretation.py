@@ -200,8 +200,9 @@ def test_app_button_only_labeled_output_and_invalidated_evidence(monkeypatch):
     assert any(markdown.value == '**AI-generated interpretation**' for markdown in app.markdown)
     app.slider(key='priority_weight_0').set_value(50).run()
     assert not app.exception and len(calls) == 1
-    assert not any(markdown.value == '**AI-generated interpretation**' for markdown in app.markdown)
-    assert any('Evidence changed' in caption.value for caption in app.caption)
+    assert any(markdown.value == '**AI-generated interpretation**' for markdown in app.markdown)
+    assert [text.value for text in app.markdown if text.value in MOCK_SECTIONS.values()] == list(MOCK_SECTIONS.values())
+    assert any('Historical interpretation' in item.value for item in app.caption)
 
 
 def test_app_api_failure_falls_back(monkeypatch):

@@ -136,7 +136,7 @@ def test_request_context_and_dashboard_only_features(monkeypatch):
     # Newly fetched Middlesex weather does not invalidate Somerset's scoped answer.
     assert len(app.session_state['question_history']) == 2
     assert not any('Your analysis has changed' in info.value for info in app.info)
-    app.button(key='open_dashboard').click().run()
+    app.button(key='nav_overview').click().run()
     assert any(header.value == 'How stable is this recommendation?' for header in app.subheader)
     assert app.button(key='overall_summary').label == 'Generate overall summary'
     factor = app.selectbox(key='sensitivity_factor').value

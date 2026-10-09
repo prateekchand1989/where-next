@@ -1,4 +1,4 @@
-"""Live controls share one current ranking without model requests or stale headlines."""
+"""Live controls share main rankings, batched previews, and guarded context refreshes."""
 import json
 
 import pandas as pd
@@ -12,17 +12,17 @@ from test_analysis_workflow import first, make_app
 from test_targeting import mock_model
 
 
-def assert_current_panels(app):
+def assert_current_panels(app, expected_rank=1):
     assert not app.exception
     weights = [app.slider(key=f'priority_weight_{i}').value for i in range(4)]
     states = app.multiselect(key='candidate_states').value
     assert sum(weights) == 100
     scored = score_counties(load_data()[0], weights)
     ranked = scored[scored.complete & scored.state.isin(states)]
-    leader = ranked.iloc[0]
+    leader = ranked.iloc[expected_rank-1]
     assert app.session_state['highlighted_fips'] == leader.fips
-    assert app.session_state['highlighted_rank'] == 1
-    assert 'Current #1 county' in card_html(app)
+    assert app.session_state['highlighted_rank'] == expected_rank
+    assert f'Current #{expected_rank} county' in card_html(app)
     assert card_values(app)[:4] == [f'{leader.county}, {leader.state}', f'{leader.employment:,.0f}',
                                f'${leader.annual_pay:,.0f}', f'{leader.electricity_cents_kwh:.2f} ¢/kWh']
     top_five = [item.value for item in app.markdown if item.value.startswith('**1. ') or
@@ -54,23 +54,25 @@ def test_live_weights_states_presets_and_no_ai_calls(monkeypatch):
     assert [app.slider(key=f'priority_weight_{i}').value for i in range(4)] == [100, 0, 0, 0]
     assert_current_panels(app)
     app.multiselect(key='candidate_states').set_value([state for state in STATES if state != 'OH']).run()
-    assert 'OH' not in set(assert_current_panels(app).head(5).state)
+    assert 'OH' not in set(assert_current_panels(app, 3).head(5).state)
     app.multiselect(key='candidate_states').set_value(['PA', 'MD']).run()
-    assert set(assert_current_panels(app).state) <= {'PA', 'MD'}
+    assert set(assert_current_panels(app, 3).state) <= {'PA', 'MD'}
     app.multiselect(key='candidate_states').set_value(STATES).run()
-    assert_current_panels(app)
+    assert_current_panels(app, 3)
     for preset in reversed(list(PRESETS)):
         app.selectbox(key='scenario').select(preset).run()
         assert [app.slider(key=f'priority_weight_{i}').value for i in range(4)] == PRESETS[preset]
-        assert_current_panels(app)
+        assert_current_panels(app, 3)
+        preview_calls = len(calls)
         app.slider(key='priority_weight_1').set_value(73).run()
         assert_current_panels(app)
         adjusted = [app.slider(key=f'priority_weight_{i}').value for i in range(4)]
         app.run()
         assert [app.slider(key=f'priority_weight_{i}').value for i in range(4)] == adjusted
         assert_current_panels(app)
-    assert len(calls) == 2
-    # Only an explicit question requests AI; its evidence uses the live controls.
+        assert len(calls) == preview_calls
+    assert sum(c['text']['format']['name'] == 'analysis_intent' for c in calls) == 1
+    # An explicit follow-up reparses intent; its evidence uses the live controls.
     app.chat_input(key='followup_question').set_value('What is the best county?').run()
     ranked = assert_current_panels(app)
     supplied = json.loads(calls[-1]['input'][0]['content'])
@@ -116,7 +118,7 @@ def test_no_complete_counties_clears_stale_highlight(monkeypatch):
     assert not any(trace.get('name') == 'Highlighted county' for trace in json.loads(chart.proto.spec)['data'])
     app.multiselect(key='candidate_states').set_value([]).run()
     assert app.session_state['highlighted_fips'] is None
-    assert any('Select at least one candidate state' in item.value for item in app.warning)
+    assert any('Select at least one supported state' in item.value for item in app.warning)
     st.cache_data.clear()
 
 

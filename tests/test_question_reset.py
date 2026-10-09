@@ -54,8 +54,8 @@ def test_ny_followup_navigation_then_fresh_broad_and_pa(monkeypatch):
     app.slider(key='priority_weight_0').set_value(60).run()
     app.chat_input(key='followup_question').set_value('Why is the current leader first?').run()
     assert evidence(calls)['candidate_states'] == ['NY'] and len(calls) == 4
-    app.button(key='open_dashboard').click().run()
-    app.button(key='return_to_ask').click().run()
+    app.button(key='nav_overview').click().run()
+    app.button(key='nav_ask').click().run()
     assert app.session_state['candidate_states'] == ['NY']
     assert app.session_state['chosen_counties'] == ['36061']
     assert app.slider(key='priority_weight_0').value == 60

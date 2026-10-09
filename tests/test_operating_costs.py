@@ -112,7 +112,8 @@ def test_live_leader_assumptions_scenarios_defaults_and_no_ai(monkeypatch):
         pd.testing.assert_frame_equal(expected_leader_cost(app), baseline_ranked)
         assert card_values(app)[:4] == initial_cards
         assert app.session_state['question_answer'] == baseline_answer
-    app.button(key='open_dashboard').click().run()
+    assert len(calls) == 2  # Cost assumptions remain outside AI evidence.
+    app.button(key='nav_overview').click().run()
     expected_leader_cost(app)
     app.slider(key='priority_weight_0').set_value(100).run()
     expected_leader_cost(app)
@@ -126,9 +127,10 @@ def test_live_leader_assumptions_scenarios_defaults_and_no_ai(monkeypatch):
         assert [app.slider(key=f'priority_weight_{i}').value for i in range(4)] == PRESETS[scenario]
         expected_leader_cost(app)
     assert card_values(app)[4] == 'Unavailable'  # Refrigerated rate intentionally absent.
-    app.button(key='return_to_ask').click().run()
+    app.button(key='nav_ask').click().run()
     assert app.number_input(key='cost_sqft').value == 250000
-    assert len(calls) == 2  # Ordinary cost, slider, state, reset and navigation interactions make no calls.
+    assert len(calls) == 2  # All manual controls and navigation remain deterministic.
+    assert sum(c['text']['format']['name'] == 'analysis_intent' for c in calls) == 1
 
 
 def test_cost_follows_leader_even_when_ai_highlights_third_county(monkeypatch):

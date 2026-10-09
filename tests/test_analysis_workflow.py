@@ -1,4 +1,4 @@
-"""Intent validation, synchronized views, response tiles, and trigger-only requests."""
+"""Intent validation, synchronized views, response tiles, and guarded requests."""
 import io
 import json
 
@@ -118,7 +118,7 @@ def test_updated_evidence_precedes_answer_and_dashboard(monkeypatch, question, p
     assert any(caption.value == 'Analysis updated' for caption in app.caption)
     turn = app.session_state['question_history'][0]
     assert turn['analysis_changed'] and turn['applied_changes'] and len(turn['summary']) < 120
-    app.button(key='open_dashboard').click().run()
+    app.button(key='nav_overview').click().run()
     assert not app.exception and len(calls) == 2
     assert app.session_state['view_mode'] == 'dashboard'
     assert not any(header.value == 'Latest answer' for header in app.subheader)
@@ -154,16 +154,16 @@ def test_enter_tiles_history_and_view_switching(monkeypatch):
     saved_history = list(app.session_state['question_history'])
     app.selectbox(key='weather_county').select(app.multiselect(key='chosen_counties').value[0]).run()
     app.session_state['interpretation_weather'] = {'42069': {'alerts': {'status': 'unavailable'}}}
-    app.button(key='open_dashboard').click().run()
+    app.button(key='nav_overview').click().run()
     assert app.session_state['view_mode'] == 'dashboard' and not app.chat_input
     assert app.session_state['question_history'] == saved_history
     app.slider(key='priority_weight_0').set_value(50).run()
-    app.button(key='return_to_ask').click().run()
+    app.button(key='nav_ask').click().run()
     assert not app.exception and app.session_state['view_mode'] == 'ask'
     assert app.slider(key='priority_weight_0').value == 50
     assert app.session_state['question_history'] == saved_history
     assert app.session_state['interpretation_weather']['42069']['alerts']['status'] == 'unavailable'
-    assert any('Your analysis has changed' in text.value for text in app.info)
+    assert any('earlier analytical configuration' in text.value for text in app.info)
     assert len(calls) == 4
     app.chat_input(key='followup_question').set_value('   ').run()
     app.run()

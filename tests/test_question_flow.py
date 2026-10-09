@@ -5,7 +5,7 @@ import json
 import pytest
 from streamlit.testing.v1 import AppTest
 
-from interpretation import INSTRUCTIONS, UNSUPPORTED_ANSWER, OpenAIProvider, generate_answer
+from interpretation import INSTRUCTIONS, UNSUPPORTED_ANSWER, OpenAIProvider, generate_answer, evidence_fingerprint
 from core import PRESETS, load_data, score_counties
 from answer_fixtures import structured_answer, card_html
 
@@ -87,7 +87,7 @@ def test_followup_invalidation_and_new_question(monkeypatch):
     assert any(text.value == '**AI-generated answer**' for text in result.markdown)
     result.slider(key='priority_weight_0').set_value(50).run()
     assert not result.exception and len(calls) == 2
-    assert any('Your analysis has changed' in text.value for text in result.info)
+    assert any('earlier analytical configuration' in text.value for text in result.info)
     assert not any(text.value == '**AI-generated answer**' for text in result.markdown)
     result.chat_input(key='followup_question').set_value('Update the screening answer').run()
     assert len(calls) == 3
@@ -107,7 +107,7 @@ def test_followup_invalidation_and_new_question(monkeypatch):
     ('candidate_states', ['PA']), ('chosen_counties', ['42069']),
     ('scenario', 'Temperature-controlled'),
 ])
-def test_evidence_controls_invalidate_without_request(monkeypatch, key, value):
+def test_evidence_controls_preserve_answer_without_request(monkeypatch, key, value):
     calls = model(monkeypatch)
     result = submit(app())
     if key == 'scenario':
@@ -117,10 +117,11 @@ def test_evidence_controls_invalidate_without_request(monkeypatch, key, value):
     else:
         result.multiselect(key=key).set_value(value).run()
     assert not result.exception and len(calls) == 1
-    assert any('Your analysis has changed' in text.value for text in result.info)
+    assert len(calls.intent_calls) == 1
+    assert result.session_state['question_answer']['fingerprint'] == evidence_fingerprint(json.loads(calls[-1]['input'][0]['content']))
 
 
-def test_new_weather_invalidates_without_ai(monkeypatch):
+def test_new_weather_preserves_existing_answer(monkeypatch):
     from datetime import datetime, timezone
     import streamlit as st
     st.cache_data.clear()
@@ -133,7 +134,8 @@ def test_new_weather_invalidates_without_ai(monkeypatch):
     result.selectbox(key='weather_county').select(county).run()
     next(button for button in result.button if button.label == 'Check NWS alerts').click().run()
     assert not result.exception and len(calls) == 1
-    assert any('Your analysis has changed' in text.value for text in result.info)
+    assert len(calls.intent_calls) == 1
+    assert result.session_state['question_answer']['fingerprint'] == evidence_fingerprint(json.loads(calls[-1]['input'][0]['content']))
     st.cache_data.clear()
 
 

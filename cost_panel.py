@@ -2,6 +2,7 @@
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+from design_system import theme_figure, themed_dataframe
 
 from operating_costs import CostAssumptions, PAY_CONVERSION_HOURS, estimate_operating_cost, lease_benchmark, load_lease_data
 
@@ -58,9 +59,9 @@ def render_cost_panel(ranked, scenario):
             fig.update_layout(height=260, margin=dict(l=0, r=16, t=12, b=20),
                               paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
                               xaxis_title='Annual USD', font_color='#20352F')
-            st.plotly_chart(fig, key='operating_cost_breakdown', alt='Annual operating costs by rent, workforce, electricity, and other occupancy')
+            st.plotly_chart(theme_figure(fig, st.session_state.get('ui_theme', 'dark')), theme=None, key='operating_cost_breakdown', alt='Annual operating costs by rent, workforce, electricity, and other occupancy')
         # Even partial costs are shown as unavailable; never turn missing data into zero.
-        st.dataframe(pd.DataFrame([
+        themed_dataframe(pd.DataFrame([
             {'Screening rank': i, 'Cost county': f'{row.county}, {row.state}',
              'Annual rent': dollars(result['components']['Facility rent']),
              'Annual workforce': dollars(result['components']['Workforce']),
@@ -95,7 +96,7 @@ def render_cost_panel(ranked, scenario):
             mapped = [{**bench, 'County': f'{row.county}, {row.state}'}
                       for (_, row), bench in zip(ranked.head(5).iterrows(), benchmarks) if bench]
             if mapped:
-                st.dataframe(pd.DataFrame(mapped)[['County', 'market', 'warehouse_type', 'asking_rent_psf_year',
+                themed_dataframe(pd.DataFrame(mapped)[['County', 'market', 'warehouse_type', 'asking_rent_psf_year',
                     'rent_basis', 'observation_kind', 'county_value_kind', 'county_confidence', 'geographic_coverage',
                     'source_organization', 'original_url', 'publication_period', 'retrieval_date']].rename(columns={
                         'market': 'Market', 'warehouse_type': 'Warehouse type',

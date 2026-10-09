@@ -82,9 +82,9 @@ def test_updated_scope_ordinal_cards_evidence_views_and_comparison(monkeypatch, 
     assert supplied['question_context']['requested_rank'] == 2
     assert app.multiselect(key='chosen_counties').value == list(pa.head(3).fips)
     assert any('**What changed**' in item.value for item in app.markdown)
-    app.button(key='open_dashboard').click().run()
+    app.button(key='nav_overview').click().run()
     assert_cards(app, pa.iloc[1], 2)
-    app.button(key='return_to_ask').click().run()
+    app.button(key='nav_ask').click().run()
     assert len(calls) == 2
     calls = mock_model(monkeypatch)
     app.chat_input(key='followup_question').set_value('What is number three?').run()
@@ -93,7 +93,8 @@ def test_updated_scope_ordinal_cards_evidence_views_and_comparison(monkeypatch, 
     app.multiselect(key='candidate_states').set_value(['NJ']).run()
     nj = scored[scored.complete & scored.state.eq('NJ')]
     assert not app.exception and len(calls) == 2
-    assert_cards(app, nj.iloc[0], 1)
+    assert sum(c['text']['format']['name'] == 'analysis_intent' for c in calls) == 1
+    assert_cards(app, nj.iloc[2], 3)
     assert app.multiselect(key='chosen_counties').value == list(nj.head(3).fips)
     app.multiselect(key='candidate_states').set_value(['NJ', 'PA']).run()
     app.multiselect(key='chosen_counties').set_value(['34035', '34023', '42077']).run()
