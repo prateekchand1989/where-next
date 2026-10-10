@@ -61,7 +61,9 @@ def test_ranking_and_map_picker_share_authoritative_selection(monkeypatch):
     assert card_values(app)[0] == f'{target.county}, {target.state}'
     chart = next(c for c in app.get('plotly_chart') if c.key == 'county_map')
     marker = json.loads(chart.proto.spec)['data'][-1]
-    assert marker['lat'] == [target.lat] and marker['lon'] == [target.lon]
+    selected = marker['text'].index(f'{target.county}, {target.state}')
+    assert marker['lat'][selected] == target.lat and marker['lon'][selected] == target.lon
+    assert marker['marker']['size'][selected] == 14
     scored = score_counties(data, PRESETS['General merchandise'])
     missing = scored.loc[~scored.complete].iloc[0]
     app.selectbox(key='map_county_selection').select(missing.fips).run()

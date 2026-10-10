@@ -100,6 +100,25 @@ def distance_miles(lat, lon, latitudes, longitudes):
     h = np.sin((a-p)/2)**2 + np.cos(p)*np.cos(a)*np.sin((b-q)/2)**2
     return 3958.7613 * 2 * np.arcsin(np.sqrt(np.clip(h, 0, 1)))
 
+def format_tooltip_value(value, formatter, prefix='', suffix=''):
+    if value is None or (isinstance(value, (float, np.floating)) and not np.isfinite(value)):
+        return 'Data unavailable'
+    if pd.isna(value):
+        return 'Data unavailable'
+    return prefix + formatter(value) + suffix
+
+
+def county_hover_rows(frame):
+    rows = frame[['county', 'state', 'employment', 'annual_pay', 'electricity_cents_kwh', 'score']].copy()
+    rows['county_label'] = rows['county'] + ', ' + rows['state']
+    rows['employment'] = rows['employment'].map(lambda value: format_tooltip_value(value, lambda numeric: f'{numeric:,.0f}'))
+    rows['annual_pay'] = rows['annual_pay'].map(lambda value: format_tooltip_value(value, lambda numeric: f'{numeric:,.0f}', prefix='$'))
+    rows['electricity_cents_kwh'] = rows['electricity_cents_kwh'].map(
+        lambda value: format_tooltip_value(value, lambda numeric: f'{numeric:.2f}', suffix=' ¢/kWh'))
+    rows['score'] = rows['score'].map(lambda value: format_tooltip_value(value, lambda numeric: f'{numeric:.1f}', suffix=' / 100'))
+    return rows[['county_label', 'employment', 'annual_pay', 'electricity_cents_kwh', 'score']]
+
+
 def evidence_brief(row):
     if not row['complete']:
         return 'Incomplete labor data: this county is shown on the map but is not ranked.'
