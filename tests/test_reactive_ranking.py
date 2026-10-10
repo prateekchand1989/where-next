@@ -34,7 +34,10 @@ def assert_current_panels(app, expected_rank=1):
     screening = next(trace for trace in traces if trace.get('colorbar', {}).get('title', {}).get('text') == 'Score')
     assert screening['locations'] == list(ranked.fips)
     marker = traces[-1]
-    assert marker['text'] == [f'{leader.county}, {leader.state}']
+    selected = marker['text'].index(f'{leader.county}, {leader.state}')
+    assert marker['lat'][selected] == leader.lat and marker['lon'][selected] == leader.lon
+    assert marker['marker']['size'][selected] == 14
+    assert marker['marker']['opacity'][selected] == 0.75
     comparison = app.multiselect(key='chosen_counties').value
     assert comparison == list(ranked.head(3).fips)
     frame = next(item.value for item in app.dataframe if 'County' in item.value and 'Score' in item.value)

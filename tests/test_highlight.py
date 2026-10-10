@@ -1,9 +1,11 @@
 """County presentation state follows existing scores and current scope."""
 import json
 
+import numpy as np
+import pandas as pd
 import pytest
 
-from core import PRESETS, load_data, score_counties
+from core import PRESETS, load_data, score_counties, county_hover_rows
 from question_state import reset_for_new_question, sync_county_state
 from question_targeting import question_targets
 from test_targeting import mock_model
@@ -16,6 +18,36 @@ from answer_fixtures import card_values, card_html, expected_answer
 @pytest.fixture
 def scored():
     return score_counties(load_data()[0], PRESETS[next(iter(PRESETS))])
+
+
+def test_county_hover_rows_keep_existing_values_and_missing_flags():
+    rows = pd.DataFrame([
+        {'county': 'Montgomery', 'state': 'PA', 'employment': 12450, 'annual_pay': 52800, 'electricity_cents_kwh': 11.4, 'score': 84.2},
+        {'county': 'Lehigh', 'state': 'PA', 'employment': 0, 'annual_pay': 0, 'electricity_cents_kwh': np.nan, 'score': 66.7},
+        {'county': 'Allegheny', 'state': 'PA', 'employment': np.nan, 'annual_pay': 21000, 'electricity_cents_kwh': 8.1, 'score': np.nan},
+    ])
+    hover = county_hover_rows(rows)
+    assert hover.iloc[0].to_dict() == {
+        'county_label': 'Montgomery, PA',
+        'employment': '12,450',
+        'annual_pay': '$52,800',
+        'electricity_cents_kwh': '11.40 ¢/kWh',
+        'score': '84.2 / 100',
+    }
+    assert hover.iloc[1].to_dict() == {
+        'county_label': 'Lehigh, PA',
+        'employment': '0',
+        'annual_pay': '$0',
+        'electricity_cents_kwh': 'Data unavailable',
+        'score': '66.7 / 100',
+    }
+    assert hover.iloc[2].to_dict() == {
+        'county_label': 'Allegheny, PA',
+        'employment': 'Data unavailable',
+        'annual_pay': '$21,000',
+        'electricity_cents_kwh': '8.10 ¢/kWh',
+        'score': 'Data unavailable',
+    }
 
 
 @pytest.mark.parametrize('question,rank', [

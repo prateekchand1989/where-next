@@ -54,7 +54,10 @@ def test_pa_to_md_cards_map_answer_followup_and_comparison(monkeypatch):
     assert any(target.county in item.value and '- ' in item.value for item in app.markdown)
     chart = next(item for item in app.get('plotly_chart') if item.key == 'county_map')
     marker = json.loads(chart.proto.spec)['data'][-1]
-    assert marker['type'] == 'scattermap' and marker['lat'] == [target.lat] and marker['lon'] == [target.lon]
+    selected = marker['text'].index(f'{target.county}, {target.state}')
+    assert marker['type'] == 'scattermap'
+    assert marker['lat'][selected] == target.lat and marker['lon'][selected] == target.lon
+    assert marker['marker']['size'][selected] == 14
     calls = mock_model(monkeypatch)
     app.chat_input(key='followup_question').set_value('Why is it number three?').run()
     assert app.session_state['candidate_states'] == ['MD']

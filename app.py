@@ -3,7 +3,7 @@ from copy import deepcopy
 import numpy as np
 import plotly.graph_objects as go
 import streamlit as st
-from core import ROOT, LABELS, PRESETS, load_data, score_counties, evidence_brief, annual_electricity_expense, weight_sensitivity
+from core import ROOT, LABELS, PRESETS, load_data, score_counties, evidence_brief, annual_electricity_expense, weight_sensitivity, county_hover_rows
 from weather import get_alerts, get_forecast
 from fema import FIELDS as FEMA_FIELDS, NUMERIC_FIELDS as FEMA_NUMERIC_FIELDS, load_fema_context
 from interpretation import (SECTIONS, build_evidence, evidence_fingerprint,
@@ -332,42 +332,75 @@ with st.container(key='workspace_' + st.session_state['view_mode']):
                     geojson=geometry, locations=[f['id'] for f in geometry['features']], z=[0] * len(geometry['features']),
                     colorscale=[[0, tokens['unavailable']], [1, tokens['unavailable']]], showscale=False,
                     marker_line_width=0.25, marker_line_color=tokens['border'], hoverinfo='skip'))
+                hover_template = (
+                    '<b>%{customdata[0]}</b>'
+                    '<br>Warehouse employees: %{customdata[1]}'
+                    '<br>Average annual salary: %{customdata[2]}'
+                    '<br>Electricity benchmark: %{customdata[3]}'
+                    '<br>Screening score: %{customdata[4]}<extra></extra>')
+                hover_counties = ranked
                 if map_view == 'Warehouse screening score' and not ranked.empty:
+                    tooltip_rows = county_hover_rows(ranked)
                     fig.add_trace(go.Choroplethmap(
                         geojson=geometry, locations=ranked.fips, z=ranked.score,
                         text=ranked.county + ', ' + ranked.state, colorscale=[[0, '#123D2B'], [.35, '#087346'], [.7, '#24C77B'], [1, '#A3F3B7']], zmin=0, zmax=100,
-                        customdata=ranked[['reach_250mi', 'employment', 'annual_pay', 'electricity_cents_kwh']].to_numpy(),
+                        customdata=tooltip_rows.to_numpy(),
                         marker_line_width=0.5, marker_line_color=tokens['border'], colorbar_title='Score',
-                        hovertemplate=(
-                            '<b>%{text}</b><br>Screening score: %{z:.1f}/100'
-                            '<br>Population within 250 miles: %{customdata[0]:,.0f}'
-                            '<br>Warehousing employment: %{customdata[1]:,.0f}'
-                            '<br>Average annual pay: $%{customdata[2]:,.0f}'
-                            '<br>Electricity benchmark: %{customdata[3]:.2f} cents/kWh<extra></extra>')))
+                        hovertemplate=hover_template))
                 elif map_view == 'FEMA risk context':
+                    hover_counties = ranked.iloc[0:0]
                     if fema_metadata['status'] == 'ok':
-                        hazard_map = view[['fips', 'county', 'state']].merge(
+                        hazard_map = view.merge(
                             fema_context[['fips', 'RISK_SCORE', 'RISK_RATNG']],
                             on='fips', how='left', validate='one_to_one')
                         hazard_map = hazard_map[hazard_map.RISK_SCORE.notna()]
+                        hover_counties = hazard_map
+                        tooltip_rows = county_hover_rows(hazard_map)
+                        risk_ratings = hazard_map.RISK_RATNG.fillna('Data unavailable')
+                        hover_customdata = np.column_stack((
+                            tooltip_rows.to_numpy(),
+                            hazard_map.RISK_SCORE.map(lambda value: f'{value:.1f}').to_numpy(),
+                            risk_ratings.to_numpy()))
+                        hover_template = hover_template.replace(
+                            '<extra></extra>',
+                            '<br>FEMA risk score: %{customdata[5]}/100'
+                            '<br>FEMA rating: %{customdata[6]}<extra></extra>')
                         fig.add_trace(go.Choroplethmap(
                             geojson=geometry, locations=hazard_map.fips, z=hazard_map.RISK_SCORE,
                             text=hazard_map.county + ', ' + hazard_map.state,
-                            customdata=hazard_map[['RISK_RATNG']].fillna('Unavailable').to_numpy(),
+                            customdata=hover_customdata,
                             colorscale='YlOrRd', zmin=0, zmax=100,
                             marker_line_width=0.5, marker_line_color=tokens['border'],
                             colorbar_title='FEMA risk',
-                            hovertemplate=('<b>%{text}</b><br>FEMA risk score: %{z:.1f}/100'
-                                           '<br>FEMA rating: %{customdata[0]}<extra></extra>')))
+                            hovertemplate=hover_template))
                         st.caption('FEMA community risk context · Higher means higher relative risk. Gray = unavailable or outside selected scope. Warehouse rankings remain unchanged.')
                     else:
                         st.info('FEMA risk context unavailable. Warehouse screening remains available.')
+                marker_fips = set(hover_counties.fips)
                 if highlighted is not None:
-                    fig.add_trace(go.Scattermap(lon=[highlighted['lon']], lat=[highlighted['lat']],
-                                               mode='markers', marker={'size': 14, 'color': tokens['accent'], 'opacity': 0.75},
-                                               name='Highlighted county', showlegend=False,
-                                               text=[f"{highlighted['county']}, {highlighted['state']}"],
-                                               hovertemplate='<b>%{text}</b><extra>Highlighted county</extra>'))
+                    marker_fips.add(highlighted['fips'])
+                hover_markers = all_scored[all_scored.fips.isin(marker_fips)]
+                if not hover_markers.empty:
+                    # The live choropleth has no hit-test geometry; county-center markers provide hover targets.
+                    marker_customdata = county_hover_rows(hover_markers).to_numpy()
+                    if map_view == 'FEMA risk context' and fema_metadata['status'] == 'ok':
+                        risk_lookup = hazard_map.set_index('fips')
+                        risk_scores = hover_markers.fips.map(risk_lookup.RISK_SCORE)
+                        risk_labels = risk_scores.map(
+                            lambda value: f'{value:.1f}' if np.isfinite(value) else 'Data unavailable')
+                        rating_labels = hover_markers.fips.map(risk_lookup.RISK_RATNG).fillna('Data unavailable')
+                        marker_customdata = np.column_stack((
+                            marker_customdata, risk_labels.to_numpy(), rating_labels.to_numpy()))
+                    marker_fips_list = hover_markers.fips.tolist()
+                    marker_sizes = [14 if fips == highlight_fips else 12 for fips in marker_fips_list]
+                    marker_opacity = [0.75 if fips == highlight_fips else 0.01 for fips in marker_fips_list]
+                    fig.add_trace(go.Scattermap(
+                        lon=hover_markers.lon.tolist(), lat=hover_markers.lat.tolist(),
+                        mode='markers',
+                        marker={'size': marker_sizes, 'color': tokens['accent'], 'opacity': marker_opacity},
+                        name='County metric hover targets', showlegend=False,
+                        text=(hover_markers.county + ', ' + hover_markers.state).tolist(),
+                        customdata=marker_customdata, hovertemplate=hover_template))
                 fig.update_layout(
                     map={'style': {'version': 8, 'sources': {}, 'layers': [{'id': 'background', 'type': 'background', 'paint': {'background-color': tokens['surface']}}]}, 'center': {'lon': -98 if national else -77.8, 'lat': 39 if national else 40.2},
                          'zoom': 2.6 if national else 4.3},
